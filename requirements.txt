@@ -1,0 +1,24 @@
+# ⚠️ torch 不要写在这里。请先单独装（--index-url 强制只用 cu128 源，
+#    否则 pip 会从 PyPI 抓到为 CUDA 13 编译的更新版，导致驱动被判定过旧）：
+#
+#    pip install torch --index-url https://download.pytorch.org/whl/cu128
+#
+#    然后再 pip install -r requirements.txt 装下面其余依赖。
+#    （cu128 装不上则把 URL 末尾换成 cu124）
+
+# transformers 锁在 4.x：5.x 移除了部分 Trainer 旧参数
+transformers>=4.46,<5.0
+datasets>=2.18
+accelerate>=0.30
+sentencepiece
+
+# 评估指标（任务7/9）
+sacrebleu
+bert-score
+
+# 测试 / Demo
+pytest>=8.0
+streamlit>=1.32
+
+# Optional LoRA:
+# peft

@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 数据集与生成产物（体积大、可由 scripts/prepare_data.py 复现）
+data/raw/
+data/processed/
+data/**/*.txt
+data/**/*.csv
+
+# 模型 checkpoint / 训练输出 / HF 缓存
+outputs/
+*.safetensors
+*.bin
+.hf_cache/
+
+# 系统/编辑器
+.DS_Store
+.idea/
+.vscode/

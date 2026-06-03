@@ -1,0 +1,33 @@
+name: classical-chinese-nlp
+channels:
+  - conda-forge
+dependencies:
+  - python=3.10
+  - pip
+  - pytest
+  - pip:
+      # ---- GPU PyTorch ----
+      # ⚠️ 不能用 --extra-index-url：pip 会从 PyPI 抓到为 CUDA 13 编译的
+      #    更新版 torch，导致驱动被判定过旧。用 --index-url 强制只走 cu128 源。
+      #    （cu128 装不上则把 cu128 换成 cu124）
+      - --index-url https://download.pytorch.org/whl/cu128
+      - torch
+      # 其余包从 PyPI 取（cu128 源没有），用 --extra-index-url 兜底。
+      - --extra-index-url https://pypi.org/simple
+
+      # ---- 训练核心 ----
+      # transformers 锁在 4.x：5.x 移除了若干 Trainer 旧参数，避免不可复现的破坏性变更。
+      - transformers>=4.46,<5.0
+      - datasets>=2.18
+      - accelerate>=0.30
+      - sentencepiece
+
+      # ---- 评估指标（任务7/9 需要）----
+      - sacrebleu
+      - bert-score
+
+      # ---- Demo（服务器训练可不装，本地演示用）----
+      - streamlit>=1.32
+
+      # Optional LoRA:
+      # - peft
