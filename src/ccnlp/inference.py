@@ -149,7 +149,22 @@ class ModelGenerator:
         self.max_new_tokens = max_new_tokens
         self.num_beams = num_beams
 
-    def generate(self, text: str, task: TaskType | str, max_source_length: int = 128) -> str:
+    def generate(
+        self,
+        text: str,
+        task: TaskType | str,
+        max_source_length: int = 128,
+        logits_processor=None,
+        num_return_sequences: int = 1,
+        return_all: bool = False,
+    ) -> str | list[str]:
+        """翻译单句。
+
+        可选参（向后兼容，默认行为不变）：
+          logits_processor      —— transformers LogitsProcessorList，用于约束解码；
+          num_return_sequences  —— 取 N-best 候选（beam search）；
+          return_all            —— True 时返回候选列表，否则返回 top-1 字符串。
+        """
         task_type = TaskType(task)
         prefix = TASK_PREFIX.get(task_type)
         if prefix is None:
@@ -162,13 +177,21 @@ class ModelGenerator:
             truncation=True,
             max_length=max_source_length,
         ).to(self.device)
+
+        gen_kwargs = {
+            "max_new_tokens": self.max_new_tokens,
+            "num_beams": max(self.num_beams, num_return_sequences),
+            "num_return_sequences": num_return_sequences,
+        }
+        if logits_processor is not None:
+            gen_kwargs["logits_processor"] = logits_processor
         with self._torch.no_grad():
-            output_ids = self.model.generate(
-                **inputs,
-                max_new_tokens=self.max_new_tokens,
-                num_beams=self.num_beams,
-            )
-        return self.tokenizer.decode(output_ids[0], skip_special_tokens=True).strip()
+            output_ids = self.model.generate(**inputs, **gen_kwargs)
+
+        decoded = [s.strip() for s in self.tokenizer.batch_decode(output_ids, skip_special_tokens=True)]
+        if return_all or num_return_sequences > 1:
+            return decoded
+        return decoded[0]
 
     def generate_batch(
         self,

@@ -23,7 +23,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--lambda_cycle",
         type=float,
         default=0.0,
-        help="回环一致性损失权重。0=标准基线(对照组A)；>0=加回环约束(实验组B)，推荐 0.5~1.0",
+        help=(
+            "回环一致性损失权重。0=标准基线；建议在已收敛基线上继续微调。"
+            "0.1 偏单向译质，0.2~0.4 偏回环保真；0.5 RTC 更高但复制率上升。"
+            "不建议从零训练直接开启较大 lambda。"
+        ),
     )
     return parser
 
