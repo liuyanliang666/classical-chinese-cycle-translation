@@ -1,4 +1,4 @@
-# 实验结果记录
+# 回环一致性实验结果记录
 
 测试集：`data/processed/test.jsonl`，498 个句对 / 方向（seed=42 划分）。
 评估脚本：`python -m ccnlp.eval_runner`（翻译质量）、`python -m ccnlp.rtc_eval`（回环一致性）、`python -m ccnlp.copy_rate`（复制坍缩诊断）、`scripts/dir_bertscore.py`（单向译文 vs 参考的 BERTScore 语义充分度）。

@@ -5,7 +5,7 @@
   今→古：pred = m2c2m.mid，ref = c2m2c.original（黄金古文）
 两方向的 c2m2c / m2c2m 行按生成顺序成对出现，用 `classical` 字段校验配对。
 
-同时重算 BLEU / ChrF 作为一致性交叉核对（应与 RESULTS.md 对得上）。
+同时重算 BLEU / ChrF 作为一致性交叉核对（应与 CYCLE_CONSISTENCY_RESULTS.md 对得上）。
 
 用法：PYTHONPATH=src python scripts/dir_bertscore.py
 """
