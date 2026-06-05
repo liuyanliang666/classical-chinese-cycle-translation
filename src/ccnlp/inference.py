@@ -124,6 +124,7 @@ class BaselineGenerator:
 TASK_PREFIX = {
     TaskType.CLASSICAL_TO_MODERN: "古文翻今：",
     TaskType.MODERN_TO_CLASSICAL: "今文翻古：",
+    TaskType.LUXUN_STYLE: "鲁迅风格化：",
 }
 
 

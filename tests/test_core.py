@@ -18,7 +18,7 @@ from ccnlp.hallucination import (
     number_faithfulness,
     unsupported_content_char_rate,
 )
-from ccnlp.inference import BaselineGenerator, TaskType
+from ccnlp.inference import BaselineGenerator, TASK_PREFIX, TaskType
 from ccnlp.preprocess import (
     ParallelExample,
     build_task_examples,
@@ -130,6 +130,10 @@ def test_baseline_generator_supports_translation_and_styles():
     assert "学" in classical and "乎" in classical
     assert "我向来" in luxun
     assert "春" in poem and "兮" in poem
+
+
+def test_model_task_prefix_supports_luxun_style_training_prefix():
+    assert TASK_PREFIX[TaskType.LUXUN_STYLE] == "鲁迅风格化："
 
 
 def test_evaluation_metrics_return_reasonable_values():
