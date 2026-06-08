@@ -16,11 +16,13 @@ dependencies:
       - --extra-index-url https://pypi.org/simple
 
       # ---- 训练核心 ----
-      # transformers 锁在 4.x：5.x 移除了若干 Trainer 旧参数，避免不可复现的破坏性变更。
-      - transformers>=4.46,<5.0
+      # transformers 锁在 4.x：5.x 移除了若干 Trainer 旧参数；Qwen3 需要较新的 4.x。
+      - transformers>=4.51,<5.0
       - datasets>=2.18
       - accelerate>=0.30
       - sentencepiece
+      - peft>=0.11
+      - bitsandbytes>=0.43
 
       # ---- 评估指标（任务7/9 需要）----
       - sacrebleu
@@ -28,6 +30,3 @@ dependencies:
 
       # ---- Demo（服务器训练可不装，本地演示用）----
       - streamlit>=1.32
-
-      # Optional LoRA:
-      # - peft

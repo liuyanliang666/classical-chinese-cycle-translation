@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 
-from ccnlp.inference import ModelGenerator
+from ccnlp.inference import CausalLoraGenerator, ModelGenerator
 
 # (task, 文本) —— 两个方向各几条，直观看双向翻译质量。
 DEMOS = [
@@ -29,7 +29,15 @@ _ARROW = {"classical_to_modern": "古→今", "modern_to_classical": "今→古"
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="查看微调模型的翻译 / 风格迁移效果")
-    parser.add_argument("--model_dir", required=True, help="训练输出目录或某个 checkpoint")
+    parser.add_argument(
+        "--backend",
+        choices=["seq2seq", "causal_lora"],
+        default="seq2seq",
+        help="推理后端：旧 Seq2Seq checkpoint 或 Qwen LoRA adapter",
+    )
+    parser.add_argument("--model_dir", default=None, help="Seq2Seq 训练输出目录或某个 checkpoint")
+    parser.add_argument("--base_model", default="Qwen/Qwen3-4B", help="Causal LoRA 的基础模型")
+    parser.add_argument("--adapter_dir", default=None, help="Causal LoRA adapter 目录")
     parser.add_argument("--input", default=None, help="单句输入；不给则跑内置示例")
     parser.add_argument(
         "--task",
@@ -39,17 +47,36 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--interactive", action="store_true", help="进入交互模式")
     parser.add_argument("--num_beams", type=int, default=4)
+    parser.add_argument(
+        "--style_strength",
+        type=float,
+        default=1.0,
+        help="Causal LoRA 鲁迅风格强度；1.0 为训练默认值，0.0 近似关闭 LoRA。",
+    )
     return parser
 
 
 def main() -> None:
     args = build_parser().parse_args()
 
-    generator = ModelGenerator(args.model_dir, num_beams=args.num_beams)
-    print(f"已加载模型：{args.model_dir}（设备：{generator.device}）\n")
+    if args.backend == "causal_lora":
+        if args.adapter_dir is None:
+            raise SystemExit("--backend causal_lora 需要提供 --adapter_dir")
+        generator = CausalLoraGenerator(
+            base_model=args.base_model,
+            adapter_dir=args.adapter_dir,
+            num_beams=args.num_beams,
+        )
+        model_label = f"{args.base_model} + {args.adapter_dir}"
+    else:
+        if args.model_dir is None:
+            raise SystemExit("--backend seq2seq 需要提供 --model_dir")
+        generator = ModelGenerator(args.model_dir, num_beams=args.num_beams)
+        model_label = args.model_dir
+    print(f"已加载模型：{model_label}（设备：{generator.device}）\n")
 
     if args.input is not None:
-        print(generator.generate(args.input, args.task))
+        print(_generate(generator, args, args.input, args.task))
         return
 
     if args.interactive:
@@ -73,11 +100,17 @@ def main() -> None:
                 task = "luxun_style"
                 continue
             if text:
-                print(f"    → {generator.generate(text, task)}\n")
+                print(f"    → {_generate(generator, args, text, task)}\n")
         return
 
     for task, text in DEMOS:
-        print(f"[{_ARROW[task]}] {text}\n    → {generator.generate(text, task)}\n")
+        print(f"[{_ARROW[task]}] {text}\n    → {_generate(generator, args, text, task)}\n")
+
+
+def _generate(generator, args: argparse.Namespace, text: str, task: str) -> str:
+    if args.backend == "causal_lora":
+        return generator.generate(text, task, style_strength=args.style_strength)
+    return generator.generate(text, task)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from numbers import Real
 
 
 class TaskType(str, Enum):
@@ -17,6 +18,46 @@ class GenerationResult:
     input_text: str
     output_text: str
     note: str
+
+
+@dataclass(frozen=True)
+class LoraScalingEntry:
+    module: object
+    adapter_name: str
+    base_scale: float
+
+
+def capture_lora_scaling_state(model: object) -> list[LoraScalingEntry]:
+    """Capture original PEFT LoRA scaling values for later strength control."""
+    entries: list[LoraScalingEntry] = []
+    named_modules = getattr(model, "named_modules", None)
+    if named_modules is None:
+        return entries
+
+    for _, module in named_modules():
+        scaling = getattr(module, "scaling", None)
+        if not isinstance(scaling, dict):
+            continue
+        for adapter_name, value in scaling.items():
+            if isinstance(value, Real):
+                entries.append(
+                    LoraScalingEntry(
+                        module=module,
+                        adapter_name=str(adapter_name),
+                        base_scale=float(value),
+                    )
+                )
+    return entries
+
+
+def apply_lora_style_strength(scaling_state: list[LoraScalingEntry], style_strength: float) -> None:
+    """Scale LoRA adapter contribution without compounding across generations."""
+    if style_strength < 0:
+        raise ValueError("style_strength must be non-negative")
+
+    for entry in scaling_state:
+        scaling = getattr(entry.module, "scaling")
+        scaling[entry.adapter_name] = entry.base_scale * style_strength
 
 
 class BaselineGenerator:
@@ -234,3 +275,120 @@ class ModelGenerator:
             output_text=self.generate(text, task_type),
             note="微调模型输出。",
         )
+
+
+class CausalLoraGenerator:
+    """Loads a Qwen-style Causal LM plus LoRA adapter for Lu Xun style transfer."""
+
+    def __init__(
+        self,
+        base_model: str,
+        adapter_dir: str,
+        device: str | None = None,
+        max_new_tokens: int = 128,
+        num_beams: int = 1,
+        load_in_4bit: bool = True,
+    ) -> None:
+        import torch
+        from peft import PeftModel
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+
+        self._torch = torch
+        self.tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+        if self.tokenizer.pad_token_id is None:
+            self.tokenizer.pad_token = self.tokenizer.eos_token
+
+        quantization_config = None
+        if load_in_4bit:
+            quantization_config = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=torch.float16,
+            )
+        self.model = AutoModelForCausalLM.from_pretrained(
+            base_model,
+            trust_remote_code=True,
+            device_map=device or "auto",
+            quantization_config=quantization_config,
+        )
+        self.model = PeftModel.from_pretrained(self.model, adapter_dir)
+        self.model.eval()
+        self._lora_scaling_state = capture_lora_scaling_state(self.model)
+        self.device = device or self._first_model_device()
+        self.max_new_tokens = max_new_tokens
+        self.num_beams = num_beams
+
+    def generate(
+        self,
+        text: str,
+        task: TaskType | str,
+        max_source_length: int = 512,
+        logits_processor=None,
+        num_return_sequences: int = 1,
+        return_all: bool = False,
+        style_strength: float = 1.0,
+    ) -> str | list[str]:
+        from ccnlp.causal_sft import build_generation_prompt
+
+        task_type = TaskType(task)
+        if task_type is not TaskType.LUXUN_STYLE:
+            raise ValueError(f"CausalLoraGenerator 仅支持鲁迅风格任务，收到：{task}")
+
+        apply_lora_style_strength(self._lora_scaling_state, style_strength)
+        prompt = build_generation_prompt(text.strip(), self.tokenizer)
+        inputs = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            max_length=max_source_length,
+        )
+        inputs = {key: value.to(self.device) for key, value in inputs.items()}
+        gen_kwargs = {
+            "max_new_tokens": self.max_new_tokens,
+            "num_beams": max(self.num_beams, num_return_sequences),
+            "num_return_sequences": num_return_sequences,
+            "do_sample": False,
+            "pad_token_id": self.tokenizer.pad_token_id,
+            "eos_token_id": self.tokenizer.eos_token_id,
+        }
+        if logits_processor is not None:
+            gen_kwargs["logits_processor"] = logits_processor
+        with self._torch.no_grad():
+            output_ids = self.model.generate(**inputs, **gen_kwargs)
+
+        prompt_len = inputs["input_ids"].shape[-1]
+        decoded = [
+            s.strip()
+            for s in self.tokenizer.batch_decode(
+                output_ids[:, prompt_len:],
+                skip_special_tokens=True,
+            )
+        ]
+        if return_all or num_return_sequences > 1:
+            return decoded
+        return decoded[0]
+
+    def generate_batch(
+        self,
+        texts: list[str],
+        task: TaskType | str,
+        max_source_length: int = 512,
+        batch_size: int = 4,
+    ) -> list[str]:
+        return [self.generate(text, task, max_source_length=max_source_length) for text in texts]
+
+    def generate_with_metadata(self, text: str, task: TaskType | str) -> GenerationResult:
+        task_type = TaskType(task)
+        return GenerationResult(
+            task=task_type,
+            input_text=text,
+            output_text=self.generate(text, task_type),
+            note="Qwen Causal LM + LoRA adapter 输出。",
+        )
+
+    def _first_model_device(self) -> str:
+        try:
+            return str(next(self.model.parameters()).device)
+        except StopIteration:
+            return "cpu"

@@ -6,11 +6,13 @@
 #    然后再 pip install -r requirements.txt 装下面其余依赖。
 #    （cu128 装不上则把 URL 末尾换成 cu124）
 
-# transformers 锁在 4.x：5.x 移除了部分 Trainer 旧参数
-transformers>=4.46,<5.0
+# transformers 锁在 4.x：5.x 移除了部分 Trainer 旧参数；Qwen3 需要较新的 4.x
+transformers>=4.51,<5.0
 datasets>=2.18
 accelerate>=0.30
 sentencepiece
+peft>=0.11
+bitsandbytes>=0.43
 
 # 评估指标（任务7/9）
 sacrebleu
@@ -19,6 +21,3 @@ bert-score
 # 测试 / Demo
 pytest>=8.0
 streamlit>=1.32
-
-# Optional LoRA:
-# peft

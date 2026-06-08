@@ -228,6 +228,82 @@ python -m ccnlp.train_seq2seq \
 比较中文中心模型和多语言模型在古今翻译任务上的差异。
 ```
 
+## 5.4 鲁迅风格：Qwen3-4B LoRA 微调
+
+鲁迅风格改写不再建议用 `IDEA-CCNL/Randeng-BART-139M-SUMMARY` 作为主模型。推荐使用：
+
+```text
+Qwen/Qwen3-4B + QLoRA
+```
+
+如果服务器 `data` 目录下已有 `luxun_plain_pairs.filtered.jsonl`，先转换成训练/验证/测试三份 JSONL：
+
+```bash
+python scripts/build_luxun_style_data.py \
+  --input data/luxun_plain_pairs.filtered.jsonl \
+  --output_dir data/processed/luxun_style
+```
+
+输出文件：
+
+```text
+data/processed/luxun_style/train.jsonl
+data/processed/luxun_style/validation.jsonl
+data/processed/luxun_style/test.jsonl
+```
+
+冒烟训练：
+
+```bash
+CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python -m ccnlp.train_causal_lora \
+  --train_file data/processed/luxun_style/train.jsonl \
+  --validation_file data/processed/luxun_style/validation.jsonl \
+  --model_name Qwen/Qwen3-4B \
+  --output_dir outputs/checkpoints/debug-qwen3-luxun-lora \
+  --max_train_samples 16 \
+  --epochs 0.05 \
+  --batch_size 1 \
+  --gradient_accumulation_steps 2 \
+  --max_seq_length 384
+```
+
+正式训练（双卡 12GB RTX 3080 Ti 可先这样跑；如果 DDP + QLoRA 在环境中不稳定，先退回单卡）：
+
+```bash
+CUDA_VISIBLE_DEVICES=0,1 accelerate launch --num_processes 2 -m ccnlp.train_causal_lora \
+  --train_file data/processed/luxun_style/train.jsonl \
+  --validation_file data/processed/luxun_style/validation.jsonl \
+  --model_name Qwen/Qwen3-4B \
+  --output_dir outputs/checkpoints/qwen3-4b-luxun-lora \
+  --epochs 3 \
+  --batch_size 1 \
+  --gradient_accumulation_steps 8 \
+  --learning_rate 1e-4 \
+  --max_seq_length 512 \
+  --lora_r 16
+```
+
+单句推理：
+
+```bash
+PYTHONPATH=src python -m ccnlp.generate \
+  --backend causal_lora \
+  --base_model Qwen/Qwen3-4B \
+  --adapter_dir outputs/checkpoints/qwen3-4b-luxun-lora \
+  --task luxun_style \
+  --input "街上很多人沉默地走过，没有人愿意先开口。"
+```
+
+测试集评估：
+
+```bash
+PYTHONPATH=src python -m ccnlp.eval_causal_lora \
+  --base_model Qwen/Qwen3-4B \
+  --adapter_dir outputs/checkpoints/qwen3-4b-luxun-lora \
+  --test_file data/processed/luxun_style/test.jsonl \
+  --output outputs/checkpoints/qwen3-4b-luxun-lora/test_predictions.jsonl
+```
+
 ## 6. 回环一致性约束训练（核心创新）
 
 ### 6.1 实验设计
