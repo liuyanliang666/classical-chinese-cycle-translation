@@ -11,6 +11,7 @@ transformers>=4.51,<5.0
 datasets>=2.18
 accelerate>=0.30
 sentencepiece
+wandb
 peft>=0.11
 bitsandbytes>=0.43
 

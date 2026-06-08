@@ -207,7 +207,37 @@ python -m ccnlp.train_seq2seq \
 outputs/checkpoints/randeng-bart-niutrans
 ```
 
-### 5.3 mT5 对照组
+### 5.3 使用 W&B 监控训练曲线
+
+如果需要判断 3 轮训练是否收敛，可以打开 Weights & Biases 记录 `loss` / `eval_loss` / `learning_rate` 曲线。第一次使用前先登录：
+
+```bash
+wandb login
+```
+
+训练时增加 `--use_wandb`、项目名和 run 名：
+
+```bash
+python -m ccnlp.train_seq2seq \
+  --train_file data/processed/train.jsonl \
+  --validation_file data/processed/validation.jsonl \
+  --model_name IDEA-CCNL/Randeng-BART-139M-SUMMARY \
+  --output_dir outputs/checkpoints/randeng-bart-cycle-lambda0.1 \
+  --epochs 3 \
+  --batch_size 4 \
+  --learning_rate 5e-5 \
+  --lambda_cycle 0.1 \
+  --logging_steps 50 \
+  --eval_steps 500 \
+  --save_steps 1000 \
+  --use_wandb \
+  --wandb_project classical-chinese-bart \
+  --wandb_run_name bart-cycle-lambda0.1-3ep
+```
+
+建议一定传 `--validation_file`，否则只能看到训练集 loss，无法用验证集曲线判断是否过拟合。
+
+### 5.4 mT5 对照组
 
 做报告对比时，可以把模型换成 mT5：
 

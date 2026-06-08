@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 
 
@@ -19,6 +20,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--save_steps", type=int, default=1000)
     parser.add_argument("--eval_steps", type=int, default=1000)
     parser.add_argument("--max_train_samples", type=int, default=None)
+    parser.add_argument("--use_wandb", action="store_true", help="Enable Weights & Biases logging.")
+    parser.add_argument("--wandb_project", default="classical-chinese-bart")
+    parser.add_argument("--wandb_run_name", default=None)
     parser.add_argument(
         "--lambda_cycle",
         type=float,
@@ -30,6 +34,26 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     return parser
+
+
+def configure_wandb_reporting(args: argparse.Namespace) -> tuple[str | list[str], str | None]:
+    """Return Trainer reporting config and set W&B environment when enabled."""
+    if not args.use_wandb:
+        return "none", None
+
+    os.environ["WANDB_PROJECT"] = args.wandb_project
+    os.environ.setdefault("WANDB_WATCH", "false")
+    if args.wandb_run_name:
+        os.environ["WANDB_RUN_NAME"] = args.wandb_run_name
+    return ["wandb"], args.wandb_run_name
+
+
+def get_input_embedding_weight(model: object) -> object:
+    """Return input embedding weights, unwrapping DataParallel/DDP if needed."""
+    base_model = model
+    while hasattr(base_model, "module"):
+        base_model = base_model.module
+    return base_model.get_input_embeddings().weight
 
 
 def main() -> None:
@@ -85,6 +109,7 @@ def main() -> None:
         remove_columns=raw_datasets["train"].column_names,
     )
     has_eval = "validation" in tokenized
+    report_to, run_name = configure_wandb_reporting(args)
 
     training_args = Seq2SeqTrainingArguments(
         output_dir=args.output_dir,
@@ -98,7 +123,8 @@ def main() -> None:
         eval_steps=args.eval_steps if has_eval else None,
         eval_strategy="steps" if has_eval else "no",
         save_total_limit=2,
-        report_to="none",
+        report_to=report_to,
+        run_name=run_name,
     )
     if args.lambda_cycle > 0:
         lambda_cycle = args.lambda_cycle
@@ -125,7 +151,7 @@ def main() -> None:
                 translation_loss = outputs.loss
 
                 # Soft Token：用 softmax 概率加权词嵌入，得到连续的“目标”表示。
-                embedding_matrix = model.get_input_embeddings().weight
+                embedding_matrix = get_input_embedding_weight(model)
                 soft_embeds = outputs.logits.softmax(dim=-1) @ embedding_matrix
 
                 # 第二次前向：连续表示作 encoder 输入，尝试重建源。
