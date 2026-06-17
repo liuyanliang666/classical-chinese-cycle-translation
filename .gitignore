@@ -5,6 +5,15 @@ __pycache__/
 .pytest_cache/
 .ipynb_checkpoints/
 
+# Node / presentation scratch files
+node_modules/
+docs/ppt_outline.md
+figures/ppt/
+package-lock.json
+
+# Agent planning notes
+docs/superpowers/
+
 # 虚拟环境
 .venv/
 venv/
