@@ -40,7 +40,7 @@ STYLE_TASKS = [
         label="鲁迅风格",
         task=TaskType.LUXUN_STYLE,
         description="面向现代文输入的文学风格改写。",
-        backend="Qwen4B 鲁迅风格微调模型",
+        backend="Qwen3-4B 鲁迅风格微调模型",
     ),
 ]
 
@@ -75,7 +75,7 @@ STYLE_CARDS = [
     ),
     StyleCard(
         title="鲁迅风格",
-        backend="Qwen4B LoRA",
+        backend="Qwen3-4B LoRA",
         description="使用鲁迅语料微调后的生成模型，突出句式、语气和批判性表达特征。",
     ),
 ]
