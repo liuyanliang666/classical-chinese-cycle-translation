@@ -15,6 +15,7 @@ from ccnlp.ui_config import DEFAULT_INPUT, DEMO_EXAMPLES, STYLE_CARDS, STYLE_TAS
 
 TASK_BY_LABEL = {task.label: task.task for task in STYLE_TASKS}
 TASK_META = {task.task: task for task in STYLE_TASKS}
+DEFAULT_TASK = TaskType.MODERN_TO_CLASSICAL
 
 
 @st.cache_resource
@@ -22,26 +23,78 @@ def load_generator() -> BaselineGenerator:
     return BaselineGenerator()
 
 
+def task_label_for(task_value: str | TaskType) -> str:
+    try:
+        task = task_value if isinstance(task_value, TaskType) else TaskType(task_value)
+    except ValueError:
+        task = DEFAULT_TASK
+    return TASK_META.get(task, STYLE_TASKS[0]).label
+
+
 def apply_page_styles() -> None:
     st.markdown(
         """
         <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;600;700;900&family=Noto+Sans+SC:wght@400;500;700&display=swap');
         :root {
-            --paper: #f6f5ef;
-            --surface: #ffffff;
-            --surface-soft: #f9faf7;
-            --ink: #18202f;
-            --muted: #667085;
-            --line: rgba(24, 32, 47, 0.12);
-            --accent: #9d3d2e;
-            --accent-strong: #7f2f24;
+            --paper: #f7f3e8;
+            --paper-deep: #ebe1cc;
+            --surface: #fffdf8;
+            --surface-soft: #f8f4ea;
+            --inkstone: #1f2733;
+            --ink-soft: #47505f;
+            --muted: #717989;
+            --line: rgba(42, 37, 30, 0.14);
+            --line-strong: rgba(42, 37, 30, 0.22);
+            --cinnabar: #a33a2b;
+            --cinnabar-deep: #76281e;
             --jade: #2f6f67;
+            --gold: #b98b35;
+            --shadow: 0 18px 42px rgba(31, 39, 51, 0.10);
+            --shadow-soft: 0 10px 26px rgba(31, 39, 51, 0.07);
+            --radius: 10px;
+            --radius-lg: 14px;
+            --ease: cubic-bezier(0.22, 0.61, 0.36, 1);
+            --font-serif: "Noto Serif SC", "Source Han Serif SC", "Songti SC", "STSong", "SimSun", serif;
+            --font-sans: "Noto Sans SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+        }
+
+        [data-testid="stAppViewContainer"],
+        section[data-testid="stSidebar"],
+        [data-testid="stMarkdownContainer"],
+        .stTextArea textarea,
+        .stButton > button,
+        .stDownloadButton > button {
+            font-family: var(--font-sans);
+        }
+
+        .demo-title,
+        .panel-title,
+        .route-section-title,
+        .sidebar-title,
+        .route-card-title,
+        .result-box {
+            font-family: var(--font-serif);
         }
 
         [data-testid="stAppViewContainer"] {
             background:
-                linear-gradient(180deg, rgba(157, 61, 46, 0.06), rgba(47, 111, 103, 0.06)),
+                radial-gradient(circle at 18% 10%, rgba(163, 58, 43, 0.08), transparent 28rem),
+                linear-gradient(135deg, rgba(47, 111, 103, 0.08), transparent 34%),
+                linear-gradient(180deg, rgba(255, 253, 248, 0.88), rgba(247, 243, 232, 0.96)),
                 var(--paper);
+        }
+
+        [data-testid="stAppViewContainer"]::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(31, 39, 51, 0.035) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(31, 39, 51, 0.025) 1px, transparent 1px);
+            background-size: 36px 36px;
+            mask-image: linear-gradient(180deg, rgba(0, 0, 0, 0.72), transparent 78%);
         }
 
         [data-testid="stHeader"] {
@@ -49,13 +102,14 @@ def apply_page_styles() -> None:
         }
 
         .main .block-container {
-            max-width: 1180px;
-            padding-top: 2rem;
-            padding-bottom: 2.5rem;
+            max-width: 1220px;
+            padding-top: 1.4rem;
+            padding-bottom: 2.8rem;
         }
 
         section[data-testid="stSidebar"] {
-            background: #f0f2ed !important;
+            background:
+                linear-gradient(180deg, rgba(255, 253, 248, 0.95), rgba(235, 225, 204, 0.82)) !important;
             border-right: 1px solid var(--line);
         }
 
@@ -66,55 +120,161 @@ def apply_page_styles() -> None:
         }
 
         section[data-testid="stSidebar"] * {
-            color: var(--ink) !important;
+            color: var(--inkstone) !important;
         }
 
         section[data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p {
             color: var(--muted) !important;
         }
 
-        .demo-hero {
-            padding: 0.35rem 0 1.3rem;
+        .sidebar-brand {
             border-bottom: 1px solid var(--line);
-            margin-bottom: 1.3rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.95rem;
+        }
+
+        .sidebar-title {
+            color: var(--inkstone) !important;
+            font-size: 1.1rem;
+            font-weight: 800;
+            margin: 0 0 0.28rem;
+        }
+
+        .sidebar-copy {
+            color: var(--muted) !important;
+            font-size: 0.86rem;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .demo-shell {
+            position: relative;
+            padding: 1.25rem 0 1.7rem;
+            margin-bottom: 1.35rem;
+            animation: fadeRise 0.6s var(--ease) both;
+        }
+
+        .demo-shell::before {
+            content: "";
+            position: absolute;
+            left: 0;
+            top: 1.35rem;
+            width: 4px;
+            height: 5.7rem;
+            border-radius: 999px;
+            background: linear-gradient(180deg, var(--cinnabar), var(--jade));
+        }
+
+        .demo-shell::after {
+            content: "";
+            position: absolute;
+            left: 1.2rem;
+            right: 0;
+            bottom: 0;
+            height: 2px;
+            border-radius: 999px;
+            background: linear-gradient(90deg,
+                var(--cinnabar) 0%, var(--gold) 22%, var(--jade) 46%, transparent 82%);
+            opacity: 0.6;
+        }
+
+        .seal {
+            position: absolute;
+            top: 1.2rem;
+            right: 0.1rem;
+            width: 3.5rem;
+            height: 3.5rem;
+            display: grid;
+            place-items: center;
+            transform: rotate(-7deg);
+            border-radius: var(--radius);
+            color: #fff;
+            background: linear-gradient(160deg, var(--cinnabar), var(--cinnabar-deep));
+            box-shadow: 0 8px 18px rgba(118, 40, 30, 0.28),
+                inset 0 0 0 2px rgba(255, 255, 255, 0.38);
+            font-family: var(--font-serif);
+            font-weight: 900;
+            font-size: 1.18rem;
+            line-height: 1.02;
+            letter-spacing: 0.05em;
+            text-align: center;
+            animation: sealStamp 0.6s var(--ease) both;
+        }
+
+        .demo-hero {
+            padding-left: 1.2rem;
         }
 
         .demo-kicker {
-            color: var(--accent) !important;
+            color: var(--cinnabar) !important;
             font-size: 0.78rem;
             font-weight: 700;
             letter-spacing: 0;
-            margin-bottom: 0.45rem;
+            margin-bottom: 0.52rem;
         }
 
         .demo-title {
-            color: var(--ink) !important;
-            font-size: clamp(2rem, 3vw, 3.1rem);
-            line-height: 1.12;
+            color: var(--inkstone) !important;
+            font-size: clamp(2.25rem, 3.2vw, 3.55rem);
+            line-height: 1.14;
             font-weight: 800;
-            letter-spacing: 0;
+            letter-spacing: 0.02em;
             margin: 0;
         }
 
         .demo-subtitle {
-            color: var(--muted) !important;
+            color: var(--ink-soft) !important;
             max-width: 780px;
             font-size: 1rem;
-            line-height: 1.7;
+            line-height: 1.8;
             margin-top: 0.75rem;
         }
 
-        div[data-testid="stVerticalBlockBorderWrapper"] {
-            background: rgba(255, 255, 255, 0.82);
+        .demo-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            margin-top: 1rem;
+        }
+
+        .demo-stat {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.42rem;
+            color: var(--ink-soft) !important;
+            background: rgba(255, 253, 248, 0.68);
             border: 1px solid var(--line);
-            border-radius: 8px;
-            box-shadow: 0 14px 36px rgba(24, 32, 47, 0.08);
+            border-radius: var(--radius);
+            padding: 0.42rem 0.7rem;
+            font-size: 0.82rem;
+            font-weight: 650;
+            transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease),
+                border-color 0.18s var(--ease);
+        }
+
+        .demo-stat:hover {
+            transform: translateY(-1px);
+            border-color: var(--gold);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .demo-stat-mark {
+            color: var(--gold) !important;
+            font-weight: 900;
+        }
+
+        div[data-testid="stVerticalBlockBorderWrapper"] {
+            background: rgba(255, 253, 248, 0.88);
+            border: 1px solid var(--line-strong);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
         }
 
         .panel-title {
-            color: var(--ink) !important;
+            color: var(--inkstone) !important;
             font-size: 1.05rem;
-            font-weight: 750;
+            font-weight: 800;
             margin: 0 0 0.25rem;
         }
 
@@ -125,109 +285,180 @@ def apply_page_styles() -> None:
             margin-bottom: 1rem;
         }
 
+        .result-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.7rem;
+            margin-bottom: 0.85rem;
+        }
+
+        .result-style {
+            color: var(--ink-soft) !important;
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+
         .result-box {
-            min-height: 228px;
-            color: var(--ink) !important;
-            background: var(--surface-soft) !important;
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 1rem 1.1rem;
-            font-size: 1.05rem;
-            line-height: 1.95;
+            min-height: 250px;
+            color: var(--inkstone) !important;
+            background:
+                linear-gradient(180deg, rgba(255, 253, 248, 0.96), rgba(248, 244, 234, 0.96)) !important;
+            border: 1px solid var(--line-strong);
+            border-radius: var(--radius);
+            padding: 1.15rem 1.2rem;
+            font-size: 1.08rem;
+            line-height: 2.05;
+            letter-spacing: 0.03em;
             white-space: pre-wrap;
+            box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+            animation: fadeRise 0.5s var(--ease) both;
         }
 
         .result-placeholder {
-            color: #8a92a1 !important;
+            color: #8a8176 !important;
         }
 
         .model-badge {
-            display: inline-block;
-            color: var(--accent-strong) !important;
-            background: rgba(157, 61, 46, 0.1) !important;
-            border: 1px solid rgba(157, 61, 46, 0.18);
+            display: inline-flex;
+            align-items: center;
+            color: var(--cinnabar-deep) !important;
+            background: rgba(163, 58, 43, 0.1) !important;
+            border: 1px solid rgba(163, 58, 43, 0.2);
             border-radius: 999px;
-            padding: 0.2rem 0.62rem;
+            padding: 0.24rem 0.66rem;
             font-size: 0.78rem;
             font-weight: 700;
-            margin-bottom: 0.8rem;
         }
 
-        .model-card {
-            min-height: 142px;
-            background: rgba(255, 255, 255, 0.78);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 1rem;
+        .route-section-title {
+            color: var(--inkstone) !important;
+            font-size: 1.18rem;
+            font-weight: 820;
+            margin: 1.6rem 0 0.8rem;
         }
 
-        .model-card-title {
-            color: var(--ink) !important;
-            font-weight: 750;
+        .route-card {
+            position: relative;
+            overflow: hidden;
+            min-height: 150px;
+            background: rgba(255, 253, 248, 0.76);
+            border: 1px solid var(--line-strong);
+            border-radius: var(--radius);
+            padding: 1.05rem 1.1rem;
+            box-shadow: var(--shadow-soft);
+            transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease),
+                border-color 0.2s var(--ease);
+        }
+
+        .route-card:hover {
+            transform: translateY(-3px);
+            border-color: rgba(185, 139, 53, 0.55);
+            box-shadow: 0 16px 34px rgba(31, 39, 51, 0.12);
+        }
+
+        .route-card::after {
+            content: "";
+            position: absolute;
+            top: -1px;
+            right: -1px;
+            width: 2.6rem;
+            height: 2.6rem;
+            background: linear-gradient(225deg, rgba(185, 139, 53, 0.45), transparent 62%);
+            border-top-right-radius: var(--radius);
+            pointer-events: none;
+        }
+
+        .route-card-title {
+            color: var(--inkstone) !important;
+            font-weight: 800;
             font-size: 1rem;
             margin-bottom: 0.35rem;
         }
 
-        .model-card-backend {
+        .route-card-backend {
             color: var(--jade) !important;
             font-size: 0.82rem;
             font-weight: 700;
             margin-bottom: 0.55rem;
         }
 
-        .model-card-description {
+        .route-card-description {
             color: var(--muted) !important;
             font-size: 0.9rem;
             line-height: 1.6;
         }
 
         .stTextArea textarea {
-            min-height: 220px;
-            color: var(--ink) !important;
-            background: #ffffff !important;
-            border: 1px solid rgba(24, 32, 47, 0.18) !important;
-            border-radius: 8px;
+            min-height: 245px;
+            color: var(--inkstone) !important;
+            background: var(--surface) !important;
+            border: 1px solid var(--line-strong) !important;
+            border-radius: var(--radius);
             line-height: 1.75;
             font-size: 1rem;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
         }
 
         .stTextArea textarea::placeholder {
-            color: #8a92a1 !important;
+            color: #8a8176 !important;
         }
 
         .stRadio > label,
         .stTextArea > label,
         .stSlider > label {
-            color: var(--ink) !important;
+            color: var(--inkstone) !important;
             font-weight: 650;
         }
 
         .stButton > button {
             min-height: 2.8rem;
-            border-radius: 8px;
-            border: 1px solid var(--accent-strong);
-            background: var(--accent);
-            color: white;
+            border-radius: var(--radius);
+            border: 1px solid var(--cinnabar-deep);
+            background: linear-gradient(180deg, var(--cinnabar), var(--cinnabar-deep));
+            color: white !important;
             font-weight: 750;
-            letter-spacing: 0;
+            letter-spacing: 0.02em;
+            box-shadow: 0 9px 18px rgba(118, 40, 30, 0.18);
+            transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease),
+                background 0.18s var(--ease);
+        }
+
+        .stButton > button *,
+        section[data-testid="stSidebar"] .stButton > button * {
+            color: white !important;
         }
 
         .stButton > button:hover {
-            border-color: var(--accent-strong);
-            background: var(--accent-strong);
-            color: white;
+            border-color: var(--cinnabar-deep);
+            background: var(--cinnabar-deep);
+            color: white !important;
+            transform: translateY(-1px);
+            box-shadow: 0 13px 24px rgba(118, 40, 30, 0.26);
+        }
+
+        .stButton > button:active {
+            transform: translateY(0);
+            box-shadow: 0 6px 12px rgba(118, 40, 30, 0.2);
         }
 
         .stButton > button:focus {
-            box-shadow: 0 0 0 3px rgba(157, 61, 46, 0.2);
+            box-shadow: 0 0 0 3px rgba(163, 58, 43, 0.2);
         }
 
         [data-baseweb="radio"] {
-            background: rgba(255, 255, 255, 0.65);
+            background: rgba(255, 253, 248, 0.74);
             border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 0.25rem 0.7rem;
+            border-radius: var(--radius);
+            padding: 0.3rem 0.72rem;
             margin-right: 0.35rem;
+            transition: border-color 0.18s var(--ease), background 0.18s var(--ease),
+                box-shadow 0.18s var(--ease);
+        }
+
+        [data-baseweb="radio"]:hover {
+            border-color: var(--cinnabar);
+            background: rgba(163, 58, 43, 0.06);
         }
 
         [data-baseweb="radio"] *,
@@ -242,17 +473,17 @@ def apply_page_styles() -> None:
         [data-baseweb="radio"] span,
         [data-baseweb="radio"] p,
         [data-baseweb="radio"] div {
-            color: var(--ink) !important;
+            color: var(--inkstone) !important;
         }
 
         div[data-baseweb="select"] > div {
-            background: #ffffff !important;
-            border-color: rgba(24, 32, 47, 0.18) !important;
+            background: var(--surface) !important;
+            border-color: var(--line-strong) !important;
         }
 
         div[data-baseweb="select"] span,
         div[data-baseweb="select"] div {
-            color: var(--ink) !important;
+            color: var(--inkstone) !important;
         }
 
         html body [data-testid="stAppViewContainer"] [data-baseweb="radio"] p,
@@ -261,11 +492,86 @@ def apply_page_styles() -> None:
         html body [data-testid="stAppViewContainer"] div[data-baseweb="slider"] p,
         html body [data-testid="stAppViewContainer"] div[data-baseweb="slider"] span,
         html body [data-testid="stAppViewContainer"] div[data-baseweb="slider"] div {
-            color: var(--ink) !important;
+            color: var(--inkstone) !important;
         }
 
         div[data-testid="stAlert"] {
-            border-radius: 8px;
+            border-radius: var(--radius);
+            border-color: rgba(47, 111, 103, 0.22);
+            background: rgba(47, 111, 103, 0.08);
+        }
+
+        .char-count {
+            margin-top: -0.35rem;
+            text-align: right;
+            color: var(--muted) !important;
+            font-size: 0.78rem;
+            letter-spacing: 0.02em;
+        }
+
+        .stDownloadButton > button {
+            min-height: 2.5rem;
+            margin-top: 0.7rem;
+            border-radius: var(--radius);
+            border: 1px solid var(--line-strong);
+            background: var(--surface);
+            color: var(--ink-soft) !important;
+            font-weight: 700;
+            transition: transform 0.18s var(--ease), border-color 0.18s var(--ease),
+                color 0.18s var(--ease), box-shadow 0.18s var(--ease);
+        }
+
+        .stDownloadButton > button:hover {
+            transform: translateY(-1px);
+            border-color: var(--jade);
+            color: var(--jade) !important;
+            box-shadow: var(--shadow-soft);
+        }
+
+        @keyframes fadeRise {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes sealStamp {
+            0% { opacity: 0; transform: scale(1.3) rotate(-7deg); }
+            55% { opacity: 1; }
+            100% { opacity: 1; transform: scale(1) rotate(-7deg); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation-duration: 0.001ms !important;
+                animation-iteration-count: 1 !important;
+                transition-duration: 0.001ms !important;
+            }
+        }
+
+        @media (max-width: 760px) {
+            .demo-shell {
+                padding-top: 0.6rem;
+            }
+
+            .demo-shell::before {
+                height: 4.6rem;
+            }
+
+            .demo-title {
+                font-size: 2.05rem;
+            }
+
+            .result-toolbar {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            .seal {
+                display: none;
+            }
+
+            .demo-shell::after {
+                left: 0;
+            }
         }
         </style>
         """,
@@ -275,15 +581,23 @@ def apply_page_styles() -> None:
 
 def initialize_state() -> None:
     st.session_state.setdefault("input_text", DEFAULT_INPUT)
-    st.session_state.setdefault("task", TaskType.MODERN_TO_CLASSICAL.value)
+    st.session_state.setdefault("task", DEFAULT_TASK.value)
+    st.session_state.setdefault("task_label", task_label_for(st.session_state["task"]))
     st.session_state.setdefault("output_text", "")
     st.session_state.setdefault("output_note", "")
 
 
 def render_sidebar() -> None:
     with st.sidebar:
-        st.header("展示样例")
-        st.caption("样例均为现代文输入，可快速切换目标风格。")
+        st.markdown(
+            """
+            <div class="sidebar-brand">
+              <div class="sidebar-title">演示样例</div>
+              <p class="sidebar-copy">选择一段现代文输入，快速切换文言文或鲁迅式改写。</p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         selected_example = st.selectbox(
             "选择样例",
             DEMO_EXAMPLES,
@@ -292,6 +606,7 @@ def render_sidebar() -> None:
         if st.button("载入样例", use_container_width=True):
             st.session_state["input_text"] = selected_example.text
             st.session_state["task"] = selected_example.task.value
+            st.session_state["task_label"] = task_label_for(selected_example.task)
             st.session_state["output_text"] = ""
             st.session_state["output_note"] = ""
 
@@ -302,11 +617,19 @@ def render_sidebar() -> None:
 def render_hero() -> None:
     st.markdown(
         """
-        <div class="demo-hero">
-          <div class="demo-kicker">CLASSICAL CHINESE NLP DEMO</div>
-          <h1 class="demo-title">现代文风格转换系统</h1>
-          <div class="demo-subtitle">
-            输入一段现代中文，选择目标风格，系统输出对应的文言文表达或鲁迅式改写。
+        <div class="demo-shell">
+          <div class="seal" aria-hidden="true">古今</div>
+          <div class="demo-hero">
+            <div class="demo-kicker">CLASSICAL CHINESE NLP DEMO</div>
+            <h1 class="demo-title">现代文风格转换系统</h1>
+            <div class="demo-subtitle">
+              输入一段现代中文，选择目标风格，系统输出对应的文言文表达或鲁迅式改写。
+            </div>
+            <div class="demo-stats">
+              <span class="demo-stat"><span class="demo-stat-mark">01</span> 现代文输入</span>
+              <span class="demo-stat"><span class="demo-stat-mark">02</span> 风格选择</span>
+              <span class="demo-stat"><span class="demo-stat-mark">03</span> 生成展示</span>
+            </div>
           </div>
         </div>
         """,
@@ -316,8 +639,7 @@ def render_hero() -> None:
 
 def render_input_panel(generator: BaselineGenerator) -> None:
     labels = [task.label for task in STYLE_TASKS]
-    current_task = TaskType(st.session_state.get("task", TaskType.MODERN_TO_CLASSICAL.value))
-    current_label = TASK_META.get(current_task, STYLE_TASKS[0]).label
+    current_label = st.session_state.get("task_label", task_label_for(st.session_state.get("task", DEFAULT_TASK.value)))
     default_index = labels.index(current_label) if current_label in labels else 0
 
     left, right = st.columns([1.02, 0.98], gap="large")
@@ -333,6 +655,7 @@ def render_input_panel(generator: BaselineGenerator) -> None:
                 labels,
                 index=default_index,
                 horizontal=True,
+                key="task_label",
             )
             selected_task = TASK_BY_LABEL[selected_label]
             st.session_state["task"] = selected_task.value
@@ -351,10 +674,15 @@ def render_input_panel(generator: BaselineGenerator) -> None:
                 placeholder="请输入一段现代中文。",
             )
             st.session_state["input_text"] = input_text
+            st.markdown(
+                f'<div class="char-count">{len(input_text.strip())} 字</div>',
+                unsafe_allow_html=True,
+            )
 
             run = st.button("生成结果", type="primary", use_container_width=True)
             if run:
-                result = generator.generate_with_metadata(input_text, selected_task, style_strength)
+                with st.spinner("正在生成…"):
+                    result = generator.generate_with_metadata(input_text, selected_task, style_strength)
                 st.session_state["output_text"] = result.output_text
                 st.session_state["output_note"] = result.note
 
@@ -367,12 +695,24 @@ def render_input_panel(generator: BaselineGenerator) -> None:
 
             st.markdown('<div class="panel-title">生成结果</div>', unsafe_allow_html=True)
             st.markdown(
-                f'<div class="model-badge">{html.escape(meta.backend)}</div>',
+                f"""
+                <div class="result-toolbar">
+                  <div class="result-style">{html.escape(meta.label)}</div>
+                  <div class="model-badge">{html.escape(meta.backend)}</div>
+                </div>
+                """,
                 unsafe_allow_html=True,
             )
             if output_text:
                 safe_output = html.escape(output_text)
                 st.markdown(f'<div class="result-box">{safe_output}</div>', unsafe_allow_html=True)
+                st.download_button(
+                    "下载结果",
+                    data=output_text,
+                    file_name="style_transfer_output.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
             else:
                 st.markdown(
                     '<div class="result-box result-placeholder">点击“生成结果”后在这里查看输出。</div>',
@@ -383,16 +723,16 @@ def render_input_panel(generator: BaselineGenerator) -> None:
 
 
 def render_model_plan() -> None:
-    st.markdown("### 模型路线")
+    st.markdown('<div class="route-section-title">模型路线</div>', unsafe_allow_html=True)
     columns = st.columns(len(STYLE_CARDS), gap="large")
     for column, card in zip(columns, STYLE_CARDS):
         with column:
             st.markdown(
                 f"""
-                <div class="model-card">
-                  <div class="model-card-title">{html.escape(card.title)}</div>
-                  <div class="model-card-backend">{html.escape(card.backend)}</div>
-                  <div class="model-card-description">{html.escape(card.description)}</div>
+                <div class="route-card">
+                  <div class="route-card-title">{html.escape(card.title)}</div>
+                  <div class="route-card-backend">{html.escape(card.backend)}</div>
+                  <div class="route-card-description">{html.escape(card.description)}</div>
                 </div>
                 """,
                 unsafe_allow_html=True,
