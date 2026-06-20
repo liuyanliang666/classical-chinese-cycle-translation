@@ -18,8 +18,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import urllib.error
+import urllib.request
 from pathlib import Path
+from typing import Any, Callable
 
 from ccnlp.evaluate import FUNCTION_WORDS, normalized_edit_distance
 
@@ -34,6 +38,14 @@ _NUMERAL_CHARS = set("0123456789.,") | set(_CJK_NUMERALS)
 _STOP_CHARS = set(FUNCTION_WORDS) | _PUNCT | _NUMERAL_CHARS
 
 _DIRECTION_NAME = {"c2m2c": "古→今", "m2c2m": "今→古"}
+
+DEFAULT_LLM_BASE_URL = "https://api.deepseek.com"
+DEFAULT_LLM_MODEL = "deepseek-v4-flash"
+_SEVERITIES = {"none", "low", "medium", "high"}
+_TASK_PREFIXES = {
+    "classical_to_modern": "古文翻今：",
+    "modern_to_classical": "今文翻古：",
+}
 
 
 def extract_numbers(text: str) -> list[str]:
@@ -81,9 +93,356 @@ def faithfulness_penalty(source: str, hyp: str, reference: str | None = None) ->
     return num_rate + char_rate
 
 
+def _build_content_hallucination_messages(
+    source: str, hyp: str, reference: str | None = None
+) -> list[dict[str, str]]:
+    ref_text = reference.strip() if reference else "未提供"
+    return [
+        {
+            "role": "system",
+            "content": (
+                "你是一个严谨的中文翻译忠实度评审。只判断译文是否相对源文"
+                "或参考译文新增、篡改、误解了事实内容；不要因为表达更通顺、"
+                "同义改写或必要补足主语就判为幻觉。"
+            ),
+        },
+        {
+            "role": "user",
+            "content": (
+                "请判断候选译文是否存在内容幻觉。\n\n"
+                "判定标准：\n"
+                "1. 若候选译文加入源文/参考都没有的人物、地点、时间、数字、事件、因果或评价，判为幻觉。\n"
+                "2. 若候选译文改变了事实关系、主体客体、数量、时间或语气立场，判为幻觉。\n"
+                "3. 合理意译、语序调整、文言到白话的必要补全，不应判为幻觉。\n\n"
+                "必须只输出 JSON，格式如下：\n"
+                "{\n"
+                '  "has_hallucination": true 或 false,\n'
+                '  "severity": "none|low|medium|high",\n'
+                '  "unsupported_claims": [{"text": "可疑内容", "reason": "原因"}],\n'
+                '  "explanation": "一句话说明"\n'
+                "}\n\n"
+                f"源文：\n{source.strip()}\n\n"
+                f"参考译文：\n{ref_text}\n\n"
+                f"候选译文：\n{hyp.strip()}"
+            ),
+        },
+    ]
+
+
+def _extract_chat_content(response: dict[str, Any]) -> str:
+    try:
+        content = response["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("API response missing choices[0].message.content") from exc
+
+    if not isinstance(content, str):
+        raise RuntimeError("API response content is not a string")
+
+    content = content.strip()
+    if not content:
+        raise RuntimeError("API returned empty content")
+    return content
+
+
+def _parse_json_object(text: str) -> dict[str, Any]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
+        cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        start = cleaned.find("{")
+        end = cleaned.rfind("}")
+        if start < 0 or end <= start:
+            raise RuntimeError("LLM response is not a JSON object")
+        try:
+            parsed = json.loads(cleaned[start : end + 1])
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"LLM response is not valid JSON: {exc}") from exc
+
+    if not isinstance(parsed, dict):
+        raise RuntimeError("LLM response JSON must be an object")
+    return parsed
+
+
+def _coerce_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "y", "1", "是", "有"}:
+            return True
+        if normalized in {"false", "no", "n", "0", "否", "无"}:
+            return False
+    return None
+
+
+def _normalize_llm_hallucination_result(parsed: dict[str, Any]) -> dict[str, Any]:
+    has_hallucination = _coerce_bool(parsed.get("has_hallucination"))
+    if has_hallucination is None:
+        raise RuntimeError("LLM JSON missing boolean has_hallucination")
+
+    severity = str(parsed.get("severity") or ("high" if has_hallucination else "none")).lower()
+    if severity not in _SEVERITIES:
+        severity = "high" if has_hallucination else "none"
+
+    unsupported_claims = parsed.get("unsupported_claims", [])
+    if unsupported_claims is None:
+        unsupported_claims = []
+    elif not isinstance(unsupported_claims, list):
+        unsupported_claims = [{"text": str(unsupported_claims), "reason": ""}]
+
+    return {
+        "has_hallucination": has_hallucination,
+        "severity": severity,
+        "unsupported_claims": unsupported_claims,
+        "explanation": str(parsed.get("explanation") or ""),
+    }
+
+
+def llm_content_hallucination(
+    source: str,
+    hyp: str,
+    reference: str | None = None,
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.0,
+    timeout: float = 60.0,
+    max_tokens: int | None = 512,
+    opener: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
+    """调用 OpenAI-compatible Chat Completions API 判断译文是否有内容幻觉。
+
+    用户可显式传入 api_key/base_url/model，也可通过环境变量提供：
+    LLM_API_KEY、LLM_API_BASE_URL、LLM_MODEL（兼容 OPENAI_API_KEY、OPENAI_BASE_URL）。
+    """
+    resolved_api_key = (
+        api_key if api_key is not None else os.getenv("LLM_API_KEY") or os.getenv("OPENAI_API_KEY")
+    )
+    if not resolved_api_key:
+        raise ValueError("api_key is required, or set LLM_API_KEY/OPENAI_API_KEY")
+
+    resolved_base_url = (
+        base_url
+        if base_url is not None
+        else os.getenv("LLM_API_BASE_URL") or os.getenv("OPENAI_BASE_URL") or DEFAULT_LLM_BASE_URL
+    )
+    resolved_model = model if model is not None else os.getenv("LLM_MODEL") or DEFAULT_LLM_MODEL
+
+    payload: dict[str, Any] = {
+        "model": resolved_model,
+        "messages": _build_content_hallucination_messages(source, hyp, reference),
+        "temperature": temperature,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    request = urllib.request.Request(
+        f"{resolved_base_url.rstrip('/')}/chat/completions",
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {resolved_api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    try:
+        response = (opener or urllib.request.urlopen)(request, timeout=timeout)
+        try:
+            raw_body = response.read()
+        finally:
+            close = getattr(response, "close", None)
+            if close is not None:
+                close()
+    except urllib.error.HTTPError as exc:
+        error_body = exc.read().decode("utf-8", errors="replace")[:1000]
+        raise RuntimeError(f"HTTP {exc.code}: {error_body}") from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"Request failed: {exc.reason}") from exc
+
+    try:
+        api_response = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"API returned invalid JSON: {exc}") from exc
+
+    content = _extract_chat_content(api_response)
+    return _normalize_llm_hallucination_result(_parse_json_object(content))
+
+
 def _load_jsonl(path: str | Path) -> list[dict]:
     with Path(path).open("r", encoding="utf-8") as fh:
         return [json.loads(line) for line in fh if line.strip()]
+
+
+def _write_jsonl(rows: list[dict], path: str | Path) -> None:
+    output = Path(path)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", encoding="utf-8") as fh:
+        for row in rows:
+            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
+
+
+def _strip_known_task_prefix(text: str, task: str | None = None) -> str:
+    value = text.strip()
+    if task and task in _TASK_PREFIXES and value.startswith(_TASK_PREFIXES[task]):
+        return value[len(_TASK_PREFIXES[task]) :].strip()
+    for prefix in _TASK_PREFIXES.values():
+        if value.startswith(prefix):
+            return value[len(prefix) :].strip()
+    return value
+
+
+def _select_text_field(
+    row: dict,
+    preferred_field: str | None,
+    fallback_fields: list[str],
+    label: str,
+) -> str:
+    fields: list[str] = []
+    if preferred_field:
+        fields.append(preferred_field)
+    fields.extend(field for field in fallback_fields if field not in fields)
+
+    for field in fields:
+        if field in row and row[field] is not None:
+            value = str(row[field]).strip()
+            if value:
+                return value
+    raise ValueError(f"{label} field not found; tried {fields}")
+
+
+def _next_reference_for_prediction(
+    reference_by_task: dict[str, list[dict]],
+    reference_offsets: dict[str, int],
+    references: list[dict],
+    global_offset: int,
+    prediction: dict,
+) -> tuple[dict, int]:
+    task = prediction.get("task")
+    if task is not None and str(task) in reference_by_task:
+        key = str(task)
+        offset = reference_offsets.get(key, 0)
+        if offset >= len(reference_by_task[key]):
+            raise ValueError(f"Not enough reference rows for task={key}")
+        reference_offsets[key] = offset + 1
+        return reference_by_task[key][offset], global_offset
+
+    if global_offset >= len(references):
+        raise ValueError("Not enough reference rows for prediction rows")
+    return references[global_offset], global_offset + 1
+
+
+def _coerce_hallucination_flag(result: dict[str, Any] | bool) -> bool:
+    if isinstance(result, dict):
+        value = result.get("has_hallucination")
+    else:
+        value = result
+    flag = _coerce_bool(value)
+    if flag is None:
+        raise RuntimeError("LLM result missing boolean has_hallucination")
+    return flag
+
+
+def judge_llm_content_hallucination_jsonl(
+    reference_file: str | Path,
+    prediction_file: str | Path,
+    output_file: str | Path | None = None,
+    *,
+    source_field: str = "source",
+    reference_field: str = "target",
+    hyp_field: str = "prediction",
+    task: str | None = None,
+    limit: int | None = None,
+    judge_one: Callable[[str, str, str | None], dict[str, Any] | bool] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
+    temperature: float = 0.0,
+    timeout: float = 60.0,
+    max_tokens: int | None = 512,
+) -> dict[str, float | int]:
+    """批量调用 LLM 判断 prediction_file 中每句译文是否有内容幻觉。
+
+    reference_file 是标准答案 jsonl，默认读取 source/target；
+    prediction_file 是待判断输出 jsonl，默认读取 prediction。
+    输出 jsonl 每行只包含 line_no/task/has_hallucination，便于统计幻觉率。
+    """
+    references = _load_jsonl(reference_file)
+    predictions = _load_jsonl(prediction_file)
+    if task is not None:
+        references = [row for row in references if row.get("task") == task]
+        predictions = [row for row in predictions if row.get("task") == task]
+    if limit is not None:
+        if limit < 0:
+            raise ValueError("limit must be non-negative")
+        predictions = predictions[:limit]
+
+    reference_by_task: dict[str, list[dict]] = {}
+    for row in references:
+        if row.get("task") is not None:
+            reference_by_task.setdefault(str(row["task"]), []).append(row)
+
+    def call_judge(source: str, hyp: str, reference: str | None) -> dict[str, Any]:
+        return llm_content_hallucination(
+            source=source,
+            hyp=hyp,
+            reference=reference,
+            api_key=api_key,
+            base_url=base_url,
+            model=model,
+            temperature=temperature,
+            timeout=timeout,
+            max_tokens=max_tokens,
+        )
+
+    judge = judge_one or call_judge
+    reference_offsets: dict[str, int] = {}
+    global_offset = 0
+    output_rows: list[dict] = []
+
+    for prediction in predictions:
+        reference_row, global_offset = _next_reference_for_prediction(
+            reference_by_task, reference_offsets, references, global_offset, prediction
+        )
+        row_task = prediction.get("task") or reference_row.get("task")
+        task_name = str(row_task) if row_task is not None else None
+        source = _strip_known_task_prefix(
+            _select_text_field(reference_row, source_field, ["input", "original"], "source"),
+            task_name,
+        )
+        reference = _select_text_field(
+            reference_row, reference_field, ["reference", "target"], "reference"
+        )
+        hyp = _select_text_field(
+            prediction,
+            hyp_field,
+            ["hyp", "output", "mid", "translation", "candidate", "target"],
+            "prediction",
+        )
+        has_hallucination = _coerce_hallucination_flag(judge(source, hyp, reference))
+
+        out_row: dict[str, Any] = {"line_no": len(output_rows) + 1}
+        if task_name is not None:
+            out_row["task"] = task_name
+        out_row["has_hallucination"] = has_hallucination
+        output_rows.append(out_row)
+
+    if output_file is not None:
+        _write_jsonl(output_rows, output_file)
+
+    n_hallucination = sum(1 for row in output_rows if row["has_hallucination"])
+    n = len(output_rows)
+    return {
+        "n": n,
+        "n_hallucination": n_hallucination,
+        "hallucination_rate": round(n_hallucination / n, 4) if n else 0.0,
+    }
 
 
 def _pair_rows(rows: list[dict]) -> tuple[list[dict], list[dict]]:
@@ -158,7 +517,7 @@ def halluc_stats(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="幻觉 / 忠实度诊断")
-    parser.add_argument("--from_file", required=True, help="rtc_roundtrip.jsonl")
+    parser.add_argument("--from_file", default=None, help="rtc_roundtrip.jsonl")
     parser.add_argument(
         "--direction",
         choices=["c2m2c", "m2c2m", "both"],
@@ -172,7 +531,51 @@ def main() -> None:
         metavar="THRESH",
         help="剔除照抄句（相似度>THRESH，如 0.8）后再算，用于去除复制对幻觉的混淆",
     )
+    parser.add_argument("--reference_file", default=None, help="LLM 判断模式：标准答案 jsonl")
+    parser.add_argument("--prediction_file", default=None, help="LLM 判断模式：待判断输出 jsonl")
+    parser.add_argument("--output", default=None, help="LLM 判断模式：逐句布尔结果 jsonl")
+    parser.add_argument("--source_field", default="source", help="标准答案 jsonl 中的源文字段")
+    parser.add_argument("--reference_field", default="target", help="标准答案 jsonl 中的参考答案字段")
+    parser.add_argument("--hyp_field", default="prediction", help="待判断输出 jsonl 中的译文字段")
+    parser.add_argument("--task", default=None, help="可选：只判断指定 task，如 classical_to_modern")
+    parser.add_argument("--limit", type=int, default=None, help="可选：只判断前 N 条，调试 API 用")
+    parser.add_argument("--api_key", default=None, help="LLM API key；也可用 LLM_API_KEY/OPENAI_API_KEY")
+    parser.add_argument("--base_url", default=None, help="OpenAI-compatible base URL；也可用环境变量")
+    parser.add_argument("--model", default=None, help="LLM 模型名；也可用 LLM_MODEL")
+    parser.add_argument("--temperature", type=float, default=0.0)
+    parser.add_argument("--timeout", type=float, default=60.0)
+    parser.add_argument("--max_tokens", type=int, default=512)
     args = parser.parse_args()
+
+    if args.reference_file or args.prediction_file:
+        if not args.reference_file or not args.prediction_file:
+            parser.error("--reference_file and --prediction_file must be used together")
+        summary = judge_llm_content_hallucination_jsonl(
+            reference_file=args.reference_file,
+            prediction_file=args.prediction_file,
+            output_file=args.output,
+            source_field=args.source_field,
+            reference_field=args.reference_field,
+            hyp_field=args.hyp_field,
+            task=args.task,
+            limit=args.limit,
+            api_key=args.api_key,
+            base_url=args.base_url,
+            model=args.model,
+            temperature=args.temperature,
+            timeout=args.timeout,
+            max_tokens=args.max_tokens,
+        )
+        print(f"标准答案：{args.reference_file}")
+        print(f"待判断输出：{args.prediction_file}")
+        if args.output:
+            print(f"逐句结果：{args.output}")
+        print(f"LLM 内容幻觉率：{summary['hallucination_rate']:.1%}")
+        print(f"幻觉句数：{summary['n_hallucination']} / {summary['n']}")
+        return
+
+    if not args.from_file:
+        parser.error("--from_file is required unless using --reference_file/--prediction_file")
 
     rows = _load_jsonl(args.from_file)
     dirs = ["c2m2c", "m2c2m"] if args.direction == "both" else [args.direction]

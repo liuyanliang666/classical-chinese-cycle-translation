@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,8 @@ from ccnlp.evaluate import (
 from ccnlp.hallucination import (
     extract_numbers,
     faithfulness_penalty,
+    judge_llm_content_hallucination_jsonl,
+    llm_content_hallucination,
     number_faithfulness,
     unsupported_content_char_rate,
 )
@@ -212,6 +215,217 @@ def test_faithfulness_penalty_lower_is_better():
     faithful = faithfulness_penalty("十三条罪", "十三条罪", reference=None)
     halluc = faithfulness_penalty("十三条罪", "四十条罪", reference=None)
     assert halluc > faithful
+
+
+def test_llm_content_hallucination_posts_to_openai_compatible_api_and_parses_json():
+    captured = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "has_hallucination": True,
+                                        "severity": "high",
+                                        "unsupported_claims": [
+                                            {
+                                                "text": "张温拜见皇帝",
+                                                "reason": "源文和参考均未提到皇帝",
+                                            }
+                                        ],
+                                        "explanation": "译文新增了拜见皇帝这一事件。",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+        def close(self):
+            captured["closed"] = True
+
+    def fake_opener(request, timeout):
+        captured["url"] = request.full_url
+        captured["auth"] = request.get_header("Authorization")
+        captured["timeout"] = timeout
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    result = llm_content_hallucination(
+        source="温故而知新",
+        hyp="张温温习旧知识后拜见皇帝",
+        reference="温习旧知识获得新理解",
+        api_key="sk-test",
+        base_url="https://example.test/v1",
+        model="deepseek-chat",
+        timeout=7.0,
+        opener=fake_opener,
+    )
+
+    assert captured["url"] == "https://example.test/v1/chat/completions"
+    assert captured["auth"] == "Bearer sk-test"
+    assert captured["timeout"] == 7.0
+    assert captured["closed"] is True
+    assert captured["payload"]["model"] == "deepseek-chat"
+    user_prompt = captured["payload"]["messages"][1]["content"]
+    assert "温故而知新" in user_prompt
+    assert "张温温习旧知识后拜见皇帝" in user_prompt
+    assert "温习旧知识获得新理解" in user_prompt
+    assert result["has_hallucination"] is True
+    assert result["severity"] == "high"
+    assert result["unsupported_claims"][0]["text"] == "张温拜见皇帝"
+
+
+def test_llm_content_hallucination_requires_api_key(monkeypatch):
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="api_key"):
+        llm_content_hallucination(
+            source="温故而知新",
+            hyp="温习旧知识获得新理解",
+            base_url="https://example.test/v1",
+            model="deepseek-chat",
+        )
+
+
+def test_llm_content_hallucination_defaults_to_deepseek_base_url(monkeypatch):
+    monkeypatch.delenv("LLM_API_BASE_URL", raising=False)
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    captured = {}
+
+    class FakeResponse:
+        def read(self):
+            return json.dumps(
+                {
+                    "choices": [
+                        {
+                            "message": {
+                                "content": json.dumps(
+                                    {
+                                        "has_hallucination": False,
+                                        "severity": "none",
+                                        "unsupported_claims": [],
+                                        "explanation": "无幻觉。",
+                                    },
+                                    ensure_ascii=False,
+                                )
+                            }
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ).encode("utf-8")
+
+        def close(self):
+            pass
+
+    def fake_opener(request, timeout):
+        captured["url"] = request.full_url
+        captured["payload"] = json.loads(request.data.decode("utf-8"))
+        return FakeResponse()
+
+    llm_content_hallucination(
+        source="温故而知新",
+        hyp="温习旧知识获得新理解",
+        reference="温习旧知识获得新理解",
+        api_key="sk-test",
+        opener=fake_opener,
+    )
+
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["payload"]["model"] == "deepseek-v4-flash"
+
+
+def test_judge_llm_content_hallucination_jsonl_outputs_sentence_flags(tmp_path: Path):
+    reference_file = tmp_path / "test.jsonl"
+    prediction_file = tmp_path / "predictions.jsonl"
+    output_file = tmp_path / "hallucination_flags.jsonl"
+    reference_file.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task": "classical_to_modern",
+                        "source": "古文翻今：温故而知新",
+                        "target": "温习旧知识获得新理解",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "task": "modern_to_classical",
+                        "source": "今文翻古：学习后按时温习",
+                        "target": "学而时习之",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "task": "classical_to_modern",
+                        "source": "古文翻今：十三条罪",
+                        "target": "十三条罪行",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    prediction_file.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "task": "classical_to_modern",
+                        "prediction": "张温温习旧知识后拜见皇帝",
+                    },
+                    ensure_ascii=False,
+                ),
+                json.dumps(
+                    {
+                        "task": "classical_to_modern",
+                        "prediction": "十三条罪行",
+                    },
+                    ensure_ascii=False,
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_judge(source, hyp, reference):
+        calls.append((source, hyp, reference))
+        return {"has_hallucination": "皇帝" in hyp}
+
+    summary = judge_llm_content_hallucination_jsonl(
+        reference_file=reference_file,
+        prediction_file=prediction_file,
+        output_file=output_file,
+        judge_one=fake_judge,
+    )
+
+    assert calls == [
+        ("温故而知新", "张温温习旧知识后拜见皇帝", "温习旧知识获得新理解"),
+        ("十三条罪", "十三条罪行", "十三条罪行"),
+    ]
+    rows = [json.loads(line) for line in output_file.read_text(encoding="utf-8").splitlines()]
+    assert rows == [
+        {"line_no": 1, "task": "classical_to_modern", "has_hallucination": True},
+        {"line_no": 2, "task": "classical_to_modern", "has_hallucination": False},
+    ]
+    assert summary == {"n": 2, "n_hallucination": 1, "hallucination_rate": 0.5}
 
 
 def test_source_copy_bias_processor_boosts_source_tokens():
