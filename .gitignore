@@ -13,6 +13,7 @@ package-lock.json
 
 # Agent planning notes
 docs/superpowers/
+CYCLE_CONSISTENCY_RESULTS.md
 
 # 虚拟环境
 .venv/
