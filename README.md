@@ -91,6 +91,19 @@ export CCNLP_LUXUN_ADAPTER=/path/to/classical_chinese_project/outputs/checkpoint
 PYTHONPATH=src uvicorn ccnlp.api_server:app --host 127.0.0.1 --port 8000
 ```
 
+服务器路径示例：
+
+```bash
+cd /root/classical_chinese_project
+conda activate classical-chinese-nlp
+
+export CCNLP_SEQ2SEQ_MODEL=/root/classical_chinese_project/outputs/checkpoints/randeng-bart-modern-to-classical-100k-bs16
+export CCNLP_QWEN_BASE_MODEL=/root/classical_chinese_project/models/Qwen3-4B-Instruct-2507
+export CCNLP_LUXUN_ADAPTER=/root/classical_chinese_project/outputs/checkpoints/qwen3-4b-instruct-modern-to-luxun-api-lora-fast/checkpoint-2364
+
+PYTHONPATH=src uvicorn ccnlp.api_server:app --host 127.0.0.1 --port 8000
+```
+
 健康检查：
 
 ```bash
