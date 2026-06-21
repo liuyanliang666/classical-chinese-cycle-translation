@@ -70,15 +70,15 @@ pip install -r requirements.txt
 
 ### 1. 在 GPU 服务器启动后端
 
-在服务器上进入项目目录，并设置模型路径：
+在服务器上进入项目目录，并设置模型路径。下面的路径都是示例，需要替换成自己服务器上的实际项目目录和模型目录：
 
 ```bash
-cd /root/classical_chinese_project
+cd /path/to/classical_chinese_project
 conda activate classical-chinese-nlp
 
-export CCNLP_SEQ2SEQ_MODEL=/root/classical_chinese_project/outputs/checkpoints/randeng-bart-modern-to-classical-100k-bs16
-export CCNLP_QWEN_BASE_MODEL=/root/classical_chinese_project/models/Qwen3-4B-Instruct-2507
-export CCNLP_LUXUN_ADAPTER=/root/classical_chinese_project/outputs/checkpoints/qwen3-4b-instruct-modern-to-luxun-api-lora-fast/checkpoint-2364
+export CCNLP_SEQ2SEQ_MODEL=/path/to/classical_chinese_project/outputs/checkpoints/<seq2seq_checkpoint>
+export CCNLP_QWEN_BASE_MODEL=/path/to/classical_chinese_project/models/<qwen_base_model>
+export CCNLP_LUXUN_ADAPTER=/path/to/classical_chinese_project/outputs/checkpoints/<luxun_lora_adapter>
 
 PYTHONPATH=src uvicorn ccnlp.api_server:app --host 127.0.0.1 --port 8000
 ```
@@ -113,8 +113,10 @@ luxun_style
 如果后端只监听服务器的 `127.0.0.1:8000`，本机需要开一个 SSH 隧道：
 
 ```bash
-ssh -p 37563 -L 8000:127.0.0.1:8000 root@ssh-cn-xinan1.ebcloud.com
+ssh -p <SSH_PORT> -L 8000:127.0.0.1:8000 <SSH_USER>@<SERVER_DOMAIN>
 ```
+
+其中 `<SERVER_DOMAIN>` 只是服务器域名地址示例占位符，需要替换成自己的 GPU 服务器域名或 IP；`<SSH_PORT>` 和 `<SSH_USER>` 也需要按实际服务器配置填写。
 
 这个终端需要保持打开。若后端已经通过公网地址暴露，则可以跳过隧道，直接把 `CCNLP_API_URL` 设置成公网 API 地址。
 
@@ -123,7 +125,7 @@ ssh -p 37563 -L 8000:127.0.0.1:8000 root@ssh-cn-xinan1.ebcloud.com
 另开一个本机终端：
 
 ```bash
-cd /Users/mac/NLP/classical_chinese_project
+cd /path/to/local/classical_chinese_project
 conda activate classical-chinese-nlp
 
 export CCNLP_API_URL=http://127.0.0.1:8000
@@ -139,7 +141,7 @@ http://localhost:8501
 如果本机没有使用 SSH 隧道，而是直接访问云端 API，则改成：
 
 ```bash
-export CCNLP_API_URL=http://服务器地址:8000
+export CCNLP_API_URL=http://<SERVER_DOMAIN_OR_IP>:8000
 streamlit run app.py
 ```
 
