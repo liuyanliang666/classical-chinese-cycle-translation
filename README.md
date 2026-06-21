@@ -24,27 +24,35 @@
 
 ```text
 .
-├── app.py                         # Streamlit Demo
-├── data/selected_aug.jsonl         # 小规模示例数据
-├── figures/lambda_ablation.png     # 回环权重消融图
+├── app.py                         # Streamlit 前端
 ├── scripts/
 │   ├── prepare_data.py             # NiuTrans 数据转换
 │   ├── run_eval.py                 # 翻译质量评估入口
 │   ├── plot_ablation.py            # lambda 消融绘图
 │   ├── faithful_eval.py            # 抗幻觉解码评估
-│   └── build_luxun_style_data.py   # 鲁迅风格数据构造
+│   ├── build_luxun_style_data.py   # 鲁迅风格数据构造
+│   ├── modernize_luxun_with_api.py # 调用大模型生成鲁迅白话对照
+│   ├── prepare_luxun_textgrid.py   # 鲁迅语料切分与清洗
+│   └── dir_bertscore.py            # 目录级 BERTScore 计算
 ├── src/ccnlp/
 │   ├── train_seq2seq.py            # Seq2Seq / 回环一致性训练
+│   ├── train_causal_lora.py        # Qwen LoRA 风格迁移训练
 │   ├── generate.py                 # 模型推理 CLI
 │   ├── api_service.py              # FastAPI 后端模型路由与懒加载
 │   ├── api_server.py               # /health 与 /generate HTTP 接口
+│   ├── inference.py                # 模型推理封装
+│   ├── ui_config.py                # 前端任务和样式配置
 │   ├── eval_runner.py              # BLEU / ChrF / ExactMatch
+│   ├── eval_causal_lora.py         # 鲁迅 LoRA 评估
 │   ├── rtc_eval.py                 # 回环一致性评估
 │   ├── copy_rate.py                # 复制坍缩诊断
 │   ├── hallucination.py            # 数字与内容字幻觉诊断
-│   └── train_causal_lora.py        # Qwen LoRA 风格迁移训练
+│   ├── faithful_decode.py          # 抗幻觉解码实验
+│   ├── causal_sft.py               # Causal LM SFT 数据处理
+│   └── luxun_textgrid.py           # 鲁迅文本切分工具
+├── output/doc/
+│   └── TransVerse_期末报告.docx     # 项目期末报告
 ├── tests/                          # 单元测试
-├── CYCLE_CONSISTENCY_RESULTS.md    # 主要实验记录
 ├── environment.yml                 # Conda 环境
 └── requirements.txt                # Python 依赖
 ```
