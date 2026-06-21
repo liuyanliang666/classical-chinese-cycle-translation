@@ -93,7 +93,7 @@ curl http://127.0.0.1:8000/health
 
 ```json
 {
-  "text": "街上很多人沉默地走过，谁也不愿意多说一句话。",
+  "text": "要转换的内容",
   "task": "luxun_style",
   "style_strength": 0.65
 }
@@ -217,28 +217,7 @@ PYTHONPATH=src python -m ccnlp.train_seq2seq \
   --lambda_cycle 0.1
 ```
 
-实验结论详见 [CYCLE_CONSISTENCY_RESULTS.md](CYCLE_CONSISTENCY_RESULTS.md)。当前结果显示：`lambda_cycle=0.1` 在 BLEU、BERTScore 和幻觉率上最稳；更大的 lambda 可进一步提升回环可逆性，但会带来更多复制风险和轻微单向译质损失。
-
-## 推理
-
-Seq2Seq checkpoint：
-
-```bash
-PYTHONPATH=src python -m ccnlp.generate \
-  --backend seq2seq \
-  --model_dir outputs/checkpoints/randeng-bart-niutrans \
-  --task classical_to_modern \
-  --input "学而时习之，不亦说乎"
-```
-
-交互模式：
-
-```bash
-PYTHONPATH=src python -m ccnlp.generate \
-  --backend seq2seq \
-  --model_dir outputs/checkpoints/randeng-bart-niutrans \
-  --interactive
-```
+当前结果显示：`lambda_cycle=0.1` 在 BLEU、BERTScore 和幻觉率上最稳；更大的 lambda 可进一步提升回环可逆性，但会带来更多复制风险和轻微单向译质损失。
 
 ## 评估
 
@@ -297,27 +276,4 @@ CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python -m ccnlp.train_causal_lora \
   --gradient_accumulation_steps 8 \
   --learning_rate 1e-4 \
   --max_seq_length 512
-```
-
-推理：
-
-```bash
-PYTHONPATH=src python -m ccnlp.generate \
-  --backend causal_lora \
-  --base_model Qwen/Qwen3-4B \
-  --adapter_dir outputs/checkpoints/qwen3-4b-luxun-lora \
-  --task luxun_style \
-  --input "街上很多人沉默地走过，没有人愿意先开口。"
-```
-
-## 测试
-
-```bash
-pytest -q
-```
-
-如只检查语法：
-
-```bash
-python -m compileall app.py src scripts tests
 ```
