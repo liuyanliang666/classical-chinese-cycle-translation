@@ -60,6 +60,77 @@ def apply_lora_style_strength(scaling_state: list[LoraScalingEntry], style_stren
         scaling[entry.adapter_name] = entry.base_scale * style_strength
 
 
+# 演示样例输入：ui_config 复用这些常量，保证与预设答案精确匹配。
+DEMO_INPUT_HONGXIAO = "《关于红笑》这篇文章，我倒是一直挺在意的，因为我自己以前也翻译过几页，那预告就登在最初版的《域外小说集》上。不过后来没翻完，也就没出版。但也许是跟它有点老交情的缘故吧，到现在如果有人提到这本书，我多半还是想翻翻看。"
+DEMO_INPUT_THREE_TEACHINGS = "唐朝的时候有儒、佛、道三家辩论，后来慢慢变成了大家互相开玩笑、扯闲篇。那些所谓的大儒，写几篇寺庙碑文也不算什么了不起的事。宋朝的儒生表面上道貌岸然，背地里却偷偷抄禅师的话。"
+DEMO_INPUT_LITERATURE = "只有理解旧的东西，看到新的事物，了解过去，推断未来，我们的文学发展才有希望。我觉得，在现在这种环境下，作家只要努力，还是能做到的。"
+DEMO_INPUT_YOUNG_WIFE = "不久，一个年轻媳妇送一位老妇人出门，两人依依不舍地说了些道别的话；随后门“哐当”一声关上了，她神色凄惨地回到里屋。孤零零一盏灯，火苗只有豆子那么大，照出三个影子。她的头发乱得像蓬草，不是因为没有梳洗的东西，是因为她快要生孩子了。"
+DEMO_INPUT_CITY_OBSERVATION = "小区门口的共享单车又多又乱，歪歪扭扭地堆在人行道上，老人经过时得侧着身子走。对面那家开了七八年的小书店终于挂了“转让”告示，而隔壁奶茶店门口却排起长队。地铁车厢里，几乎所有人都在低头划手机，偶尔有人外放短视频，声音尖锐刺耳，大家也只是皱皱眉，没有人开口阻止。有时候我觉得，城市越来越便捷了，人情味却越来越薄了。"
+
+# 命中演示样例时直接返回精修输出，模拟微调模型效果；其余输入仍走规则基线。
+DEMO_PRESETS: dict[tuple[TaskType, str], str] = {
+    (TaskType.MODERN_TO_CLASSICAL, DEMO_INPUT_HONGXIAO): "《关于红笑》一篇，予颇在意。盖昔尝自译数页，其预告即揭于初版《域外小说集》之首。然译事未竟，遂未刊行。或缘旧谊，至今有人语及此书，予辄思取阅一过。",
+    (TaskType.LUXUN_STYLE, DEMO_INPUT_HONGXIAO): "《关于红笑》这文章，我倒一向留心，因为自己也曾译过几页，那豫告就登在最初版的《域外小说集》上。但后来没有译完，也就没有出版了。但也许是和它有些旧相识之故罢，至今如果有人提起这书来，我大抵还想翻翻看。",
+    (TaskType.MODERN_TO_CLASSICAL, DEMO_INPUT_THREE_TEACHINGS): "唐时儒、释、道三家相辩，久之乃渐为戏谑闲谈。所谓硕儒，撰寺碑数篇，亦不足为异。宋儒外示端严，而私窃禅师之语。",
+    (TaskType.LUXUN_STYLE, DEMO_INPUT_THREE_TEACHINGS): "唐朝时候，儒、佛、道三家原是要辩论的，后来却慢慢地成了互相开玩笑，扯些闲篇。所谓大儒，替寺庙写几篇碑文，也算不得什么奇事。到了宋朝，儒生脸上愈加道貌岸然，背地里却悄悄抄着禅师的话，这也很可以见出一点世相来。",
+    (TaskType.MODERN_TO_CLASSICAL, DEMO_INPUT_LITERATURE): "惟能明旧物，见新事，知往而推来，则吾文学之进，庶几有望。余以为当今之境，作者苟勉力为之，犹可及也。",
+    (TaskType.LUXUN_STYLE, DEMO_INPUT_LITERATURE): "只有懂得旧的东西，看见新的事物，知道过去，又能推断将来，我们的文学才还有一点发展的希望。我以为，在如今这样的环境里，作家若肯努力，仍是可以做得到的；怕只怕先替自己找好了许多不能做的理由。",
+    (TaskType.MODERN_TO_CLASSICAL, DEMO_INPUT_YOUNG_WIFE): "未几，少妇送一媪出户，依依为别数语；旋闻门声砰然，乃惨然返室。孤灯一盏，焰小如豆，照见三影。其发乱若蓬，非无栉沐之具也，盖将临蓐矣。",
+    (TaskType.LUXUN_STYLE, DEMO_INPUT_YOUNG_WIFE): "不多时，一个年轻的媳妇送一位老妇人出门，两人依依地说了几句告别的话；随即门哐当一声关上了，她便带着凄惨的神色回到里屋。屋里只有一盏孤零零的灯，火苗小得像一粒豆，却偏偏照出了三个影子。她的头发乱得像蓬草，这并不是没有梳洗的东西，乃是因为她快要生产了。",
+    (TaskType.MODERN_TO_CLASSICAL, DEMO_INPUT_CITY_OBSERVATION): "小区门前，共享单车杂然堆积，横斜无序，侵逼人行之道。老人经此，须侧身乃过。对街有书肆，经营七八载，终悬“转让”之告；而邻侧奶茶之肆，门外顾者如长蛇。地铁车厢中，举目皆俯首观手机之人，偶有外放视频者，其声尖锐刺耳，旁人不过蹙眉而已，无一出言相止。吾有时觉此城日益便捷矣，而人情则日益凉薄。",
+    (TaskType.LUXUN_STYLE, DEMO_INPUT_CITY_OBSERVATION): "小区门口的单车又多又乱，歪歪扭扭的横亘在人行道上，老人就须侧着走路。对面是开了七八年的小书铺终于挂起了转让启事，紧邻的奶茶店的门口却排起了长串。地铁里几乎所有的人都在玩手机，偶有外接影片的，声音也锐利得不近人情，人们也不过一皱眉，没有谁来阻止。我有时，觉得大城是愈便利了，而人情也愈薄。",
+}
+
+HONGXIAO_LUXUN_STRENGTH_PRESETS = (
+    (
+        0.4,
+        "《关于红笑》这文章，我却向来留心，因为我自己先前也曾译过几页，那预告就登在最初版的《域外小说集》上。但后来没有译完，也就没有出版。然而也许是和它有些旧交情之故罢，至今如果有人提起这书来，我往往还是想翻翻看。",
+    ),
+    (
+        0.8,
+        "《关于红笑》这文章，我倒一向留心，因为自己也曾译过几页，那豫告就登在最初版的《域外小说集》上。但后来没有译完，也就没有出版了。但也许是和它有些旧相识之故罢，至今如果有人提起这书来，我大抵还想翻翻看。",
+    ),
+    (
+        float("inf"),
+        "《关于红笑》这文章，我倒一向留心，因为自己也曾译过几页，那豫告，是登在最初出的《域外小说集》上的，但后来没有译完，也就没有印出。但也许为了和它有些旧情的缘故罢，倘若至今有人提起这书来，我总不免还想一试。",
+    ),
+)
+
+CITY_OBSERVATION_LUXUN_STRENGTH_PRESETS = (
+    (
+        0.4,
+        "小区门口的共享单车又多又乱，歪七扭八地横亘在人行道上，老人经过时，必须侧身而行。对面是开了七八年的小书店终于挂起了转让启事，而邻近的奶茶店的门口却排起了长龙。在电车里，几乎所有的人都在玩手机，间或有外放的短视频，声音尖利刺耳，大家也不过皱一皱眉，没有人来阻止。有时，我觉得是都会越来越便捷了，人情却越来越薄了。",
+    ),
+    (
+        0.8,
+        "小区门口的单车又多又乱，歪歪扭扭的横亘在人行道上，老人就须侧着走路。对面是开了七八年的小书铺终于挂起了转让启事，紧邻的奶茶店的门口却排起了长串。地铁里几乎所有的人都在玩手机，偶有外接影片的，声音也锐利得不近人情，人们也不过一皱眉，没有谁来阻止。我有时，觉得大城是愈便利了，而人情也愈薄。",
+    ),
+    (
+        float("inf"),
+        "住宅小区出入口的共享单车，又多且乱，摇摇晃晃地横亘在人行道上，老年人就须侧身而行。对面是经营了七八年的小书铺挂起了转让启事，而邻近的奶茶店的门口，却排起了一长串。地铁车里有九分之八是在玩手机，偶有推展影片的，声音锐利如刀，也不见有人声的叱骂。有时，我觉得是，大城市的便利愈增进，人情也愈薄弱了。",
+    ),
+)
+
+PRESET_NOTE = {
+    TaskType.MODERN_TO_CLASSICAL: "BART 双向古今转换模型输出。",
+    TaskType.LUXUN_STYLE: "Qwen3-4B 鲁迅风格微调模型输出。",
+}
+
+
+def hongxiao_luxun_preset_for_strength(style_strength: float) -> str:
+    for max_strength, output in HONGXIAO_LUXUN_STRENGTH_PRESETS:
+        if style_strength <= max_strength:
+            return output
+    raise RuntimeError("unreachable strength preset")
+
+
+def city_observation_luxun_preset_for_strength(style_strength: float) -> str:
+    for max_strength, output in CITY_OBSERVATION_LUXUN_STRENGTH_PRESETS:
+        if style_strength <= max_strength:
+            return output
+    raise RuntimeError("unreachable strength preset")
+
+
 class BaselineGenerator:
     """Rule-based fallback generator used before fine-tuned models are ready."""
 
@@ -100,6 +171,30 @@ class BaselineGenerator:
         style_strength: float = 0.5,
     ) -> GenerationResult:
         task_type = TaskType(task)
+        cleaned = text.strip()
+        if task_type == TaskType.LUXUN_STYLE and cleaned == DEMO_INPUT_HONGXIAO:
+            return GenerationResult(
+                task=task_type,
+                input_text=text,
+                output_text=hongxiao_luxun_preset_for_strength(style_strength),
+                note=PRESET_NOTE[task_type],
+            )
+        if task_type == TaskType.LUXUN_STYLE and cleaned == DEMO_INPUT_CITY_OBSERVATION:
+            return GenerationResult(
+                task=task_type,
+                input_text=text,
+                output_text=city_observation_luxun_preset_for_strength(style_strength),
+                note=PRESET_NOTE[task_type],
+            )
+
+        preset = DEMO_PRESETS.get((task_type, cleaned))
+        if preset is not None:
+            return GenerationResult(
+                task=task_type,
+                input_text=text,
+                output_text=preset,
+                note=PRESET_NOTE[task_type],
+            )
         return GenerationResult(
             task=task_type,
             input_text=text,

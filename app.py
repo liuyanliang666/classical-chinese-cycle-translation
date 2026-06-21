@@ -1,26 +1,93 @@
 from __future__ import annotations
 
 import html
+import json
+import os
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
+from typing import Any, Callable
 
 import streamlit as st
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "src"))
 
-from ccnlp.inference import BaselineGenerator, TaskType
-from ccnlp.ui_config import DEFAULT_INPUT, DEMO_EXAMPLES, STYLE_CARDS, STYLE_TASKS
+from ccnlp.inference import GenerationResult, TaskType
+from ccnlp.ui_config import STYLE_CARDS, STYLE_TASKS
 
 
 TASK_BY_LABEL = {task.label: task.task for task in STYLE_TASKS}
 TASK_META = {task.task: task for task in STYLE_TASKS}
 DEFAULT_TASK = TaskType.MODERN_TO_CLASSICAL
+DEFAULT_API_URL = "http://127.0.0.1:8000"
+
+
+class ApiGenerationClient:
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = 180.0,
+        opener: Callable[..., Any] | None = None,
+    ) -> None:
+        self.base_url = (base_url or os.getenv("CCNLP_API_URL") or DEFAULT_API_URL).rstrip("/")
+        self.timeout = timeout
+        self.opener = opener or urllib.request.urlopen
+
+    def generate_with_metadata(
+        self,
+        text: str,
+        task: TaskType | str,
+        style_strength: float = 1.0,
+    ) -> GenerationResult:
+        task_type = TaskType(task)
+        payload = {
+            "text": text,
+            "task": task_type.value,
+            "style_strength": style_strength,
+        }
+        body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        request = urllib.request.Request(
+            f"{self.base_url}/generate",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+
+        try:
+            response = self.opener(request, timeout=self.timeout)
+            try:
+                raw_body = response.read()
+            finally:
+                close = getattr(response, "close", None)
+                if close is not None:
+                    close()
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            raise RuntimeError(f"API HTTP {exc.code}: {detail}") from exc
+        except urllib.error.URLError as exc:
+            raise RuntimeError(f"无法连接云端推理服务：{exc.reason}") from exc
+
+        try:
+            parsed = json.loads(raw_body.decode("utf-8"))
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"云端推理服务返回了无效 JSON：{exc}") from exc
+
+        output = str(parsed.get("output", "")).strip()
+        if not output:
+            raise RuntimeError("云端推理服务返回了空结果")
+        return GenerationResult(
+            task=task_type,
+            input_text=text,
+            output_text=output,
+            note=str(parsed.get("note") or "云端模型输出。"),
+        )
 
 
 @st.cache_resource
-def load_generator() -> BaselineGenerator:
-    return BaselineGenerator()
+def load_generator() -> ApiGenerationClient:
+    return ApiGenerationClient()
 
 
 def task_label_for(task_value: str | TaskType) -> str:
@@ -319,6 +386,57 @@ def apply_page_styles() -> None:
             color: #8a8176 !important;
         }
 
+        .result-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            gap: 0.95rem;
+        }
+
+        .loading-ring {
+            width: 2.7rem;
+            height: 2.7rem;
+            border-radius: 50%;
+            border: 3px solid rgba(163, 58, 43, 0.18);
+            border-top-color: var(--cinnabar);
+            animation: spin 0.8s linear infinite;
+        }
+
+        .loading-text {
+            color: var(--ink-soft) !important;
+            font-size: 0.92rem;
+            letter-spacing: 0.12em;
+        }
+
+        .loading-dots {
+            display: inline-block;
+            margin-left: 0.1em;
+        }
+
+        .loading-dots i {
+            font-style: normal;
+            opacity: 0;
+            animation: dotPulse 1.4s ease-in-out infinite;
+        }
+
+        .loading-dots i:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .loading-dots i:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        @keyframes dotPulse {
+            0%, 100% { opacity: 0; }
+            50% { opacity: 1; }
+        }
+
         .model-badge {
             display: inline-flex;
             align-items: center;
@@ -545,6 +663,11 @@ def apply_page_styles() -> None:
                 animation-iteration-count: 1 !important;
                 transition-duration: 0.001ms !important;
             }
+
+            .loading-ring {
+                animation-duration: 0.8s !important;
+                animation-iteration-count: infinite !important;
+            }
         }
 
         @media (max-width: 760px) {
@@ -580,38 +703,11 @@ def apply_page_styles() -> None:
 
 
 def initialize_state() -> None:
-    st.session_state.setdefault("input_text", DEFAULT_INPUT)
+    st.session_state.setdefault("input_text", "")
     st.session_state.setdefault("task", DEFAULT_TASK.value)
     st.session_state.setdefault("task_label", task_label_for(st.session_state["task"]))
     st.session_state.setdefault("output_text", "")
     st.session_state.setdefault("output_note", "")
-
-
-def render_sidebar() -> None:
-    with st.sidebar:
-        st.markdown(
-            """
-            <div class="sidebar-brand">
-              <div class="sidebar-title">演示样例</div>
-              <p class="sidebar-copy">选择一段现代文输入，快速切换文言文或鲁迅式改写。</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-        selected_example = st.selectbox(
-            "选择样例",
-            DEMO_EXAMPLES,
-            format_func=lambda item: item.title,
-        )
-        if st.button("载入样例", use_container_width=True):
-            st.session_state["input_text"] = selected_example.text
-            st.session_state["task"] = selected_example.task.value
-            st.session_state["task_label"] = task_label_for(selected_example.task)
-            st.session_state["output_text"] = ""
-            st.session_state["output_note"] = ""
-
-        st.divider()
-        st.caption("当前版本先保留规则基线输出；真实 BART 和 Qwen 模型可在同一界面入口替换接入。")
 
 
 def render_hero() -> None:
@@ -637,7 +733,7 @@ def render_hero() -> None:
     )
 
 
-def render_input_panel(generator: BaselineGenerator) -> None:
+def render_input_panel(generator: ApiGenerationClient) -> None:
     labels = [task.label for task in STYLE_TASKS]
     current_label = st.session_state.get("task_label", task_label_for(st.session_state.get("task", DEFAULT_TASK.value)))
     default_index = labels.index(current_label) if current_label in labels else 0
@@ -660,14 +756,16 @@ def render_input_panel(generator: BaselineGenerator) -> None:
             selected_task = TASK_BY_LABEL[selected_label]
             st.session_state["task"] = selected_task.value
 
-            style_strength = st.slider(
-                "鲁迅风格强度",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.65,
-                step=0.05,
-                help="仅影响鲁迅风格输出；文言文风格会忽略该值。",
-            )
+            style_strength = 0.65
+            if selected_task == TaskType.LUXUN_STYLE:
+                style_strength = st.slider(
+                    "鲁迅风格强度",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.65,
+                    step=0.05,
+                    help="仅在选择鲁迅风格时显示，用于调节鲁迅风格化强度。",
+                )
             input_text = st.text_area(
                 "现代文输入",
                 value=st.session_state["input_text"],
@@ -680,18 +778,11 @@ def render_input_panel(generator: BaselineGenerator) -> None:
             )
 
             run = st.button("生成结果", type="primary", use_container_width=True)
-            if run:
-                with st.spinner("正在生成…"):
-                    result = generator.generate_with_metadata(input_text, selected_task, style_strength)
-                st.session_state["output_text"] = result.output_text
-                st.session_state["output_note"] = result.note
 
     with right:
         with st.container(border=True):
             selected_task = TaskType(st.session_state.get("task", TaskType.MODERN_TO_CLASSICAL.value))
             meta = TASK_META.get(selected_task, STYLE_TASKS[0])
-            output_text = st.session_state.get("output_text", "")
-            output_note = st.session_state.get("output_note", "")
 
             st.markdown('<div class="panel-title">生成结果</div>', unsafe_allow_html=True)
             st.markdown(
@@ -703,21 +794,47 @@ def render_input_panel(generator: BaselineGenerator) -> None:
                 """,
                 unsafe_allow_html=True,
             )
-            if output_text:
-                safe_output = html.escape(output_text)
-                st.markdown(f'<div class="result-box">{safe_output}</div>', unsafe_allow_html=True)
-                st.download_button(
-                    "下载结果",
-                    data=output_text,
-                    file_name="style_transfer_output.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-            else:
-                st.markdown(
-                    '<div class="result-box result-placeholder">点击“生成结果”后在这里查看输出。</div>',
-                    unsafe_allow_html=True,
-                )
+
+            result_slot = st.empty()
+            if run:
+                with result_slot.container():
+                    st.markdown(
+                        """
+                        <div class="result-box result-loading">
+                          <div class="loading-ring"></div>
+                          <div class="loading-text">正在生成<span class="loading-dots"><i>.</i><i>.</i><i>.</i></span></div>
+                        </div>
+                        """,
+                        unsafe_allow_html=True,
+                    )
+                try:
+                    result = generator.generate_with_metadata(input_text, selected_task, style_strength)
+                except Exception as exc:  # noqa: BLE001 - surface remote inference failures in the UI.
+                    st.session_state["output_text"] = ""
+                    st.session_state["output_note"] = ""
+                    st.error(f"生成失败：{exc}")
+                else:
+                    st.session_state["output_text"] = result.output_text
+                    st.session_state["output_note"] = result.note
+
+            output_text = st.session_state.get("output_text", "")
+            output_note = st.session_state.get("output_note", "")
+            with result_slot.container():
+                if output_text:
+                    safe_output = html.escape(output_text)
+                    st.markdown(f'<div class="result-box">{safe_output}</div>', unsafe_allow_html=True)
+                    st.download_button(
+                        "下载结果",
+                        data=output_text,
+                        file_name="style_transfer_output.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+                else:
+                    st.markdown(
+                        '<div class="result-box result-placeholder">点击“生成结果”后在这里查看输出。</div>',
+                        unsafe_allow_html=True,
+                    )
             if output_note:
                 st.info(output_note)
 
@@ -745,7 +862,6 @@ def main() -> None:
     initialize_state()
 
     generator = load_generator()
-    render_sidebar()
     render_hero()
     render_input_panel(generator)
     render_model_plan()

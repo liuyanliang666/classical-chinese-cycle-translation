@@ -8,11 +8,11 @@ dependencies:
   - pip:
       # ---- GPU PyTorch ----
       # ⚠️ 不能用 --extra-index-url：pip 会从 PyPI 抓到为 CUDA 13 编译的
-      #    更新版 torch，导致驱动被判定过旧。用 --index-url 强制只走 cu128 源。
-      #    （cu128 装不上则把 cu128 换成 cu124）
-      - --index-url https://download.pytorch.org/whl/cu128
+      #    更新版 torch，导致驱动被判定过旧。CUDA 12.6 服务器用 cu126。
+      #    用 --index-url 强制只走 cu126 源。
+      - --index-url https://download.pytorch.org/whl/cu126
       - torch
-      # 其余包从 PyPI 取（cu128 源没有），用 --extra-index-url 兜底。
+      # 其余包从 PyPI 取（cu126 源没有），用 --extra-index-url 兜底。
       - --extra-index-url https://pypi.org/simple
 
       # ---- 训练核心 ----
@@ -31,3 +31,5 @@ dependencies:
 
       # ---- Demo（服务器训练可不装，本地演示用）----
       - streamlit>=1.32
+      - fastapi>=0.110
+      - "uvicorn[standard]>=0.29"

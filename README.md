@@ -17,7 +17,7 @@
 - 古文 -> 白话文、白话文 -> 古文双向 Seq2Seq 训练与推理。
 - `lambda_cycle` 回环一致性训练实验。
 - RTC 回环一致性、复制率、幻觉率等评估脚本。
-- Streamlit 本地 Demo。
+- Streamlit 本地前端 + FastAPI 云端 GPU 推理后端。
 - 鲁迅风格改写的 Qwen3-4B LoRA 数据处理、训练、推理和评估入口。
 
 ## 目录结构
@@ -36,6 +36,8 @@
 ├── src/ccnlp/
 │   ├── train_seq2seq.py            # Seq2Seq / 回环一致性训练
 │   ├── generate.py                 # 模型推理 CLI
+│   ├── api_service.py              # FastAPI 后端模型路由与懒加载
+│   ├── api_server.py               # /health 与 /generate HTTP 接口
 │   ├── eval_runner.py              # BLEU / ChrF / ExactMatch
 │   ├── rtc_eval.py                 # 回环一致性评估
 │   ├── copy_rate.py                # 复制坍缩诊断
@@ -64,16 +66,81 @@ pip install -r requirements.txt
 
 ## 运行 Demo
 
-当前 Demo 使用轻量规则基线，适合展示交互流程；训练好的模型可通过 CLI 推理。
+当前 Demo 采用前后端分离方式运行：GPU 服务器启动 FastAPI 推理后端，本机启动 Streamlit 前端。前端只负责输入、风格选择和展示后端返回结果；文言文风格和鲁迅风格的真实模型推理由后端完成。
+
+### 1. 在 GPU 服务器启动后端
+
+在服务器上进入项目目录，并设置模型路径：
 
 ```bash
+cd /root/classical_chinese_project
+conda activate classical-chinese-nlp
+
+export CCNLP_SEQ2SEQ_MODEL=/root/classical_chinese_project/outputs/checkpoints/randeng-bart-modern-to-classical-100k-bs16
+export CCNLP_QWEN_BASE_MODEL=/root/classical_chinese_project/models/Qwen3-4B-Instruct-2507
+export CCNLP_LUXUN_ADAPTER=/root/classical_chinese_project/outputs/checkpoints/qwen3-4b-instruct-modern-to-luxun-api-lora-fast/checkpoint-2364
+
+PYTHONPATH=src uvicorn ccnlp.api_server:app --host 127.0.0.1 --port 8000
+```
+
+健康检查：
+
+```bash
+curl http://127.0.0.1:8000/health
+```
+
+生成接口是 `POST /generate`，请求体示例：
+
+```json
+{
+  "text": "街上很多人沉默地走过，谁也不愿意多说一句话。",
+  "task": "luxun_style",
+  "style_strength": 0.65
+}
+```
+
+其中 `task` 可取：
+
+```text
+modern_to_classical
+luxun_style
+```
+
+鲁迅风格前端滑块是 `0` 到 `1`，后端推理时会映射到 `1.0` 到 `1.3` 的 LoRA 风格强度。
+
+### 2. 在本机打通 SSH 隧道
+
+如果后端只监听服务器的 `127.0.0.1:8000`，本机需要开一个 SSH 隧道：
+
+```bash
+ssh -p 37563 -L 8000:127.0.0.1:8000 root@ssh-cn-xinan1.ebcloud.com
+```
+
+这个终端需要保持打开。若后端已经通过公网地址暴露，则可以跳过隧道，直接把 `CCNLP_API_URL` 设置成公网 API 地址。
+
+### 3. 在本机启动前端
+
+另开一个本机终端：
+
+```bash
+cd /Users/mac/NLP/classical_chinese_project
+conda activate classical-chinese-nlp
+
+export CCNLP_API_URL=http://127.0.0.1:8000
 streamlit run app.py
 ```
 
-默认地址通常是：
+默认前端地址通常是：
 
-```text
+```bash
 http://localhost:8501
+```
+
+如果本机没有使用 SSH 隧道，而是直接访问云端 API，则改成：
+
+```bash
+export CCNLP_API_URL=http://服务器地址:8000
+streamlit run app.py
 ```
 
 ## 准备古今平行语料
