@@ -1,4 +1,4 @@
-# 古文今译：回环一致性约束的古今中文双向翻译
+# TransVerse：**现代文多风格生成系统**
 
 本项目研究两个相关的中文生成任务：古文与现代汉语之间的双向翻译，以及现代汉语到鲁迅风格文本的改写。古今互译部分将视觉领域 CycleGAN 的 **Cycle Consistency** 思想迁移到文本生成任务中，目标不是只追求单向 BLEU，而是让译文在语义、结构和关键信息上更可逆，减少古今互译中的信息丢失和幻觉；鲁迅风格任务使用 Qwen3-4B LoRA 进行风格迁移训练与推理。
 
@@ -50,9 +50,6 @@
 │   ├── faithful_decode.py          # 抗幻觉解码实验
 │   ├── causal_sft.py               # Causal LM SFT 数据处理
 │   └── luxun_textgrid.py           # 鲁迅文本切分工具
-├── output/doc/
-│   └── TransVerse_期末报告.docx     # 项目期末报告
-├── tests/                          # 单元测试
 ├── environment.yml                 # Conda 环境
 └── requirements.txt                # Python 依赖
 ```
@@ -71,6 +68,33 @@ pip install -r requirements.txt
 conda activate classical-chinese-nlp
 pip install -r requirements.txt
 ```
+
+## 下载模型权重
+
+运行 Demo 前，需要在项目根目录下载 Seq2Seq 基座模型、Qwen3-4B 基座模型，以及本文训练得到的两个 checkpoint。
+
+```bash
+cd /root/classical_chinese_project
+
+pip install -U huggingface_hub
+hf auth login
+
+mkdir -p models outputs/checkpoints
+
+hf download IDEA-CCNL/Randeng-BART-139M-SUMMARY \
+  --local-dir models/Randeng-BART-139M-SUMMARY
+
+hf download Qwen/Qwen3-4B \
+  --local-dir models/Qwen3-4B-Instruct-2507
+
+hf download liuyanliang/randeng-bart-modern-to-classical-100k-bs16 \
+  --local-dir outputs/checkpoints/randeng-bart-modern-to-classical-100k-bs16
+
+hf download liuyanliang/qwen3-4b-instruct-modern-to-luxun-api-lora-fast \
+  --local-dir outputs/checkpoints/qwen3-4b-instruct-modern-to-luxun-api-lora-fast
+```
+
+下载完成后，后端启动命令中的环境变量应指向上述本地目录。如果不下载已训练 checkpoint，也可以按照后文训练命令从头训练。
 
 ## 运行 Demo
 
@@ -129,7 +153,7 @@ luxun_style
 
 鲁迅风格前端滑块是 `0` 到 `1`，后端推理时会映射到 `1.0` 到 `1.3` 的 LoRA 风格强度。
 
-### 2. 在本机打通 SSH 隧道
+### 2. 在本机打通 SSH 隧道（如果只在本机进行推理，这一步可以跳过）
 
 如果后端只监听服务器的 `127.0.0.1:8000`，本机需要开一个 SSH 隧道：
 
@@ -165,6 +189,8 @@ http://localhost:8501
 export CCNLP_API_URL=http://<SERVER_DOMAIN_OR_IP>:8000
 streamlit run app.py
 ```
+
+## 训练步骤
 
 ## 准备古今平行语料
 
@@ -290,7 +316,7 @@ python scripts/build_luxun_style_data.py \
 CUDA_VISIBLE_DEVICES=0 PYTHONPATH=src python -m ccnlp.train_causal_lora \
   --train_file data/processed/luxun_style/train.jsonl \
   --validation_file data/processed/luxun_style/validation.jsonl \
-  --model_name Qwen/Qwen3-4B \
+  --model_name Qwen/Qwen3-4B-Instruct-2507 \
   --output_dir outputs/checkpoints/qwen3-4b-luxun-lora \
   --epochs 3 \
   --batch_size 1 \
