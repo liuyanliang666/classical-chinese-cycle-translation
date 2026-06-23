@@ -192,7 +192,7 @@ streamlit run app.py
 
 ## 训练步骤
 
-## 准备古今平行语料
+#### 准备古今平行语料
 
 下载 NiuTrans/Classical-Modern 数据后，将原始目录转换为双向 JSONL：
 
@@ -221,7 +221,7 @@ data/processed/test.jsonl
 {"task": "modern_to_classical", "source": "今文翻古：学习后按时温习，不也很快乐吗", "target": "学而时习之，不亦说乎"}
 ```
 
-## 训练 Seq2Seq 基线
+#### 训练 Seq2Seq 基线
 
 推荐从中文生成模型 `IDEA-CCNL/Randeng-BART-139M-SUMMARY` 开始：
 
@@ -248,7 +248,7 @@ PYTHONPATH=src python -m ccnlp.train_seq2seq \
   --max_train_samples 200
 ```
 
-## 回环一致性训练
+#### 回环一致性训练
 
 建议先训练一个可用的标准翻译模型，再在该 checkpoint 上继续进行回环一致性微调。不要从零训练时直接开启较大的 `lambda_cycle`，否则容易诱发复制坍缩。
 
@@ -266,7 +266,7 @@ PYTHONPATH=src python -m ccnlp.train_seq2seq \
 
 当前结果显示：`lambda_cycle=0.1` 在 BLEU、BERTScore 和幻觉率上最稳；更大的 lambda 可进一步提升回环可逆性，但会带来更多复制风险和轻微单向译质损失。
 
-## 评估
+#### 评估
 
 翻译质量：
 
@@ -300,7 +300,7 @@ PYTHONPATH=src python -m ccnlp.hallucination \
   --from_file outputs/rtc_roundtrip.jsonl
 ```
 
-## 鲁迅风格 LoRA
+#### 鲁迅风格 LoRA
 
 将鲁迅风格平行数据转换为训练集：
 
